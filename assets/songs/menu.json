@@ -2,13 +2,12 @@
   "version": "1.0",
   "songs": [
     {
-      "id": "demo-song",
-      "title": "Demo Song",
-      "artist": "Unknown Artist",
-      "bpm": 180,
-      "duration": "2:00",
-      "file": "demo-song.mid",
-      "preview": null
+      "id": "1",
+      "file": "Last.mid",
+      "title": "Last",
+      "artist": "onoken",
+      "preview": null,
+      "difficulties": ["normal", "normal+"]
     }
   ]
 }

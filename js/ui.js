@@ -47,6 +47,7 @@ class UIManager {
         // 设置面板
         this.settingsSongTitle  = document.getElementById('settingsSongTitle');
         this.settingsSongArtist = document.getElementById('settingsSongArtist');
+        this.settingsSongMeta   = document.getElementById('settingsSongMeta');
         this.speedValue         = document.getElementById('speedValue');
 
         // 音量
@@ -227,7 +228,8 @@ class UIManager {
 
                 selectedSongSource = 'import';
                 selectedLibrarySong = null;
-                selectedSongDisplayName = file.name;
+                // 根据导入的 MIDI 文件名生成 title（去掉扩展名）
+                selectedSongDisplayName = file.name.replace(/\.midi?$/i, '');
 
                 this.updateSelectionDisplay();
                 this.updateAllHighlights();
@@ -331,6 +333,13 @@ class UIManager {
             const arrayBuffer = await response.arrayBuffer();
             const parser = new MidiParser(arrayBuffer);
             loadedMidiData = parser.parse();
+
+            // 根据 MIDI 文件内容计算 bpm 和 duration，更新 song 对象
+            if (loadedMidiData) {
+                song.bpm = computeAverageBpm(loadedMidiData);
+                song.duration = formatDuration(loadedMidiData.duration);
+            }
+
             return true;
         } catch (err) {
             console.error('Failed to load MIDI:', err);
@@ -351,8 +360,54 @@ class UIManager {
             this.settingsSongArtist.textContent = 'Custom Import';
         }
 
+        // 显示从 MIDI 计算的 BPM 和时长
+        if (loadedMidiData) {
+            const bpm = computeAverageBpm(loadedMidiData);
+            const dur = formatDuration(loadedMidiData.duration);
+            this.settingsSongMeta.textContent = `BPM ${bpm}  •  ${dur}`;
+        } else {
+            this.settingsSongMeta.textContent = '';
+        }
+
+        // 根据歌曲的 difficulties 字段过滤难度按钮
+        this.filterDifficultyButtons();
+
         this.startScreen.classList.add('hidden');
         this.settingsScreen.classList.remove('hidden');
+    }
+
+    /**
+     * 根据当前选中歌曲的 difficulties 数组，启用/禁用难度按钮
+     * 导入的 MIDI 文件默认允许全部难度
+     */
+    filterDifficultyButtons() {
+        let allowedDiffs = null;
+
+        if (selectedSongSource === 'library' && selectedLibrarySong
+            && selectedLibrarySong.difficulties && selectedLibrarySong.difficulties.length > 0) {
+            allowedDiffs = selectedLibrarySong.difficulties;
+        }
+        // 导入的 MIDI 或空 difficulties 数组不限制难度（allowedDiffs 为 null 表示全部允许）
+
+        const diffBtns = document.querySelectorAll('.diff-btn');
+        let firstAvailable = null;
+
+        diffBtns.forEach(btn => {
+            const diff = btn.dataset.diff;
+            const isAllowed = !allowedDiffs || allowedDiffs.includes(diff);
+            btn.disabled = !isAllowed;
+            btn.classList.toggle('disabled', !isAllowed);
+
+            if (isAllowed && !firstAvailable) {
+                firstAvailable = diff;
+            }
+        });
+
+        // 如果当前选中的难度不在允许列表中，自动切换到第一个可用难度
+        const currentAllowed = !allowedDiffs || allowedDiffs.includes(selectedDifficulty);
+        if (!currentAllowed && firstAvailable) {
+            this.setDifficulty(firstAvailable);
+        }
     }
 
     hideSettings() {

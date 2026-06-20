@@ -135,3 +135,30 @@ function getHitSoundConfig() {
     }
     return { perfectFreq: 1200, greatFreq: 900, missFreq: 200, duration: 0.1, gain: 0.2 };
 }
+
+// ==================== MIDI 元数据计算 ====================
+
+/**
+ * 从 MIDI 解析数据中计算平均 BPM
+ * @param {Object} midiData - MidiParser.parse() 的返回结果
+ * @returns {number} 平均 BPM，若无法计算则返回 120
+ */
+function computeAverageBpm(midiData) {
+    if (!midiData || !midiData.tempos || midiData.tempos.length === 0) {
+        return 120;
+    }
+    const sum = midiData.tempos.reduce((acc, t) => acc + t.bpm, 0);
+    return Math.round(sum / midiData.tempos.length);
+}
+
+/**
+ * 将秒数格式化为 "M:SS" 字符串
+ * @param {number} seconds
+ * @returns {string}
+ */
+function formatDuration(seconds) {
+    if (!seconds || seconds <= 0) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+}

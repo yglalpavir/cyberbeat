@@ -46,29 +46,6 @@ class Renderer {
             ctx.lineTo(x, this.canvasHeight);
             ctx.stroke();
             ctx.setLineDash([]);
-
-            const keyY = this.canvasHeight - 60;
-            const isPressed = gameState.pressedKeys.has(KEYS[i]);
-
-            // 按键背景
-            ctx.fillStyle = isPressed ? TRACK_COLORS[i] : 'rgba(255, 255, 255, 0.05)';
-            ctx.beginPath();
-            ctx.roundRect(x, keyY, CONFIG.trackWidth, 40, 8);
-            ctx.fill();
-
-            // 按键边框
-            ctx.strokeStyle = isPressed ? TRACK_COLORS[i] : 'rgba(255, 255, 255, 0.2)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.roundRect(x, keyY, CONFIG.trackWidth, 40, 8);
-            ctx.stroke();
-
-            // 按键文字
-            ctx.fillStyle = isPressed ? '#000' : 'rgba(255, 255, 255, 0.7)';
-            ctx.font = 'bold 16px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(TRACK_KEYS[i], x + CONFIG.trackWidth / 2, keyY + 20);
         }
 
         // 判定线
@@ -123,15 +100,29 @@ class Renderer {
         const h = 24;
 
         if (style === 'orb') {
-            // 球皮：胶囊形（全圆角）
+            // 球皮：圆形 Note（正圆），直径略小于轨道宽度
+            const cx = x + CONFIG.trackWidth / 2;               // 圆心 X（轨道中心）
+            const cy = y + h / 2;                                // 圆心 Y
+            const radius = CONFIG.trackWidth * 0.4;             // 半径 = 轨道宽 × 0.4 ≈ 32
+
+            // 外发光
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12;
+
+            // 主体圆形
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.roundRect(x + 2, y, w, h, 12); // 圆角半径 = 半高，形成胶囊
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
             ctx.fill();
-            // 高光
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+
+            // 关闭外发光
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+
+            // 内高光（左上小圆）
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
             ctx.beginPath();
-            ctx.roundRect(x + 6, y + 4, w - 12, h / 3, 6);
+            ctx.arc(cx - radius * 0.2, cy - radius * 0.35, radius * 0.3, 0, Math.PI * 2);
             ctx.fill();
         } else {
             // 砖皮：圆角矩形带顶部高光

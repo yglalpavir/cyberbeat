@@ -540,6 +540,13 @@ body {
     color: var(--text-secondary);
 }
 
+.ssi-meta {
+    font-size: 0.7rem;
+    color: var(--text-tertiary);
+    margin-top: 4px;
+    font-family: var(--font-mono);
+}
+
 .settings-group {
     display: flex;
     flex-direction: column;
@@ -582,6 +589,13 @@ body {
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
+}
+
+.diff-btn.disabled,
+.diff-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 /* 样式选择 */
@@ -638,14 +652,16 @@ body {
     box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
-/* 球皮预览：胶囊形（全圆角）带高光 */
+/* 球皮预览：圆形带高光 */
 .style-orb {
-    background: linear-gradient(180deg, 
-        rgba(255,255,255,0.25) 0%, 
-        var(--accent) 30%, 
+    background: radial-gradient(circle at 35% 30%, 
+        rgba(255,255,255,0.45) 0%, 
+        var(--accent) 40%, 
         var(--accent) 100%);
-    border-radius: 12px; /* 半高即12px，形成胶囊 */
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    box-shadow: 0 0 8px rgba(77, 171, 247, 0.5);
 }
 
 /* 速度 */
