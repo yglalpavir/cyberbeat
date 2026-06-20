@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "songs": [
+    {
+      "id": "demo-song",
+      "title": "Demo Song",
+      "artist": "Unknown Artist",
+      "bpm": 180,
+      "duration": "2:00",
+      "file": "demo-song.mid",
+      "preview": null
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>CyberBeat Pixel</title>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
@@ -10,129 +10,171 @@
 <body>
     <canvas id="gameCanvas"></canvas>
 
-    <!-- Start Screen -->
+    <!-- ==================== 开始画面 - 曲库选择 ==================== -->
     <div id="startScreen" class="screen">
         <div class="bg-grid"></div>
-        <div class="pixel-box">
-            <div class="logo-container">
-                <h1 class="logo">CYBER<br>BEAT</h1>
-                <p class="subtitle">PIXEL DREAM</p>
+        
+        <div class="start-layout">
+            <!-- 左侧：LOGO + 状态 -->
+            <div class="start-sidebar">
+                <div class="logo-block">
+                    <h1 class="logo">CYBER<br>BEAT</h1>
+                    <p class="subtitle">PIXEL DREAM</p>
+                </div>
+                
+                <div class="current-selection" id="currentSelection">
+                    <div class="cs-label">SELECTED</div>
+                    <div class="cs-name" id="selectedSongName">NONE</div>
+                    <div class="cs-source" id="selectedSongSource"></div>
+                </div>
+                
+                <div class="start-actions">
+                    <button class="pixel-btn dark" id="settingsBtn" disabled>
+                        <span class="btn-icon">⚙</span> CONFIG
+                    </button>
+                    <button class="pixel-btn green" id="startBtn" disabled>
+                        <span class="btn-icon">▶</span> START
+                    </button>
+                </div>
             </div>
             
-            <div class="status-display">
-                <div class="status-item">
-                    <span class="label">MODE</span>
-                    <span class="value" id="displayMode">CUSTOM</span>
-                </div>
-                <div class="status-item">
-                    <span class="label">STYLE</span>
-                    <span class="value" id="displayDiff">NORMAL+</span>
-                </div>
-            </div>
-
-            <div class="action-area">
-                <div id="midiSection" class="file-slot">
-                    <div class="icon">▼</div>
-                    <span class="text">INSERT MIDI</span>
-                    <input type="file" id="midiUpload" accept=".mid">
-                </div>
-                <div class="file-name-display" id="fileName">NO FILE</div>
-
-                <div class="btn-row">
-                    <button class="pixel-btn dark" id="settingsBtn">CONFIG</button>
-                    <button class="pixel-btn green" id="startBtn">START</button>
+            <!-- 右侧：曲库列表 -->
+            <div class="start-main">
+                <div class="song-panel">
+                    <div class="song-panel-header">
+                        <span class="panel-title">MUSIC SELECT</span>
+                        <span class="panel-count" id="songCount">0 TRACKS</span>
+                    </div>
+                    
+                    <div class="song-list-wrapper" id="songListWrapper">
+                        <!-- 导入 MIDI -->
+                        <div class="song-card import-card" id="importMidiCard">
+                            <div class="card-accent"></div>
+                            <div class="card-body">
+                                <div class="card-icon import-card-icon">📂</div>
+                                <div class="card-info">
+                                    <span class="card-title import-title">IMPORT MIDI</span>
+                                    <span class="card-sub import-sub">Load from device</span>
+                                </div>
+                                <div class="card-arrow">▶</div>
+                            </div>
+                            <input type="file" id="midiUpload" accept=".mid" class="card-file-input">
+                        </div>
+                        
+                        <!-- 分割线 -->
+                        <div class="song-divider">
+                            <span class="divider-text">LIBRARY</span>
+                        </div>
+                        
+                        <!-- 曲库歌曲 -->
+                        <div class="song-cards" id="songCards">
+                            <!-- JS 动态渲染 -->
+                        </div>
+                        
+                        <!-- 空状态 -->
+                        <div class="song-empty" id="songEmpty" style="display:none;">
+                            <span class="empty-icon">🎵</span>
+                            <span class="empty-text">NO SONGS IN LIBRARY</span>
+                            <span class="empty-hint">Use IMPORT MIDI above</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Settings Screen -->
+    <!-- ==================== 设置画面 ==================== -->
     <div id="settingsScreen" class="screen hidden">
-        <div class="pixel-box">
-            <h2 style="color: var(--pixel-blue); margin-bottom: 20px; font-size: 16px; width:100%; text-align:center;">
-                CONFIGURATION
-            </h2>
+        <div class="settings-overlay">
+            <div class="settings-card">
+                <div class="settings-header">
+                    <h2 class="settings-title">CONFIGURATION</h2>
+                </div>
+                
+                <div class="settings-song-info" id="settingsSongInfo">
+                    <span class="ssi-title" id="settingsSongTitle">NO SONG</span>
+                    <span class="ssi-artist" id="settingsSongArtist"></span>
+                </div>
 
-            <div class="settings-group">
-                <span class="settings-label">MODE</span>
-                <div class="btn-row">
-                    <button class="pixel-btn" id="modePreset">PRESET</button>
-                    <button class="pixel-btn pink" id="modeCustom">CUSTOM</button>
+                <div class="settings-group">
+                    <span class="settings-label">DIFFICULTY</span>
+                    <div class="diff-selector-row">
+                        <button class="diff-btn easy" data-diff="easy">EASY</button>
+                        <button class="diff-btn easy-plus" data-diff="easy+">EASY+</button>
+                        <button class="diff-btn normal" data-diff="normal">NORMAL</button>
+                        <button class="diff-btn normal-plus active" data-diff="normal+">NORMAL+</button>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <span class="settings-label">NOTE STYLE</span>
+                    <div class="style-selector-row">
+                        <button class="style-btn" data-style="pixel">
+                            <span class="style-preview style-pixel"></span>
+                            <span>PIXEL</span>
+                        </button>
+                        <button class="style-btn active" data-style="orb">
+                            <span class="style-preview style-orb"></span>
+                            <span>ORB</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <span class="settings-label">SPEED</span>
+                    <div class="speed-row">
+                        <button class="speed-btn" id="speedDown">−</button>
+                        <span class="speed-value" id="speedValue">16.0</span>
+                        <button class="speed-btn" id="speedUp">+</button>
+                    </div>
+                </div>
+
+                <div class="settings-actions">
+                    <button class="pixel-btn dark" id="settingsBackBtn">BACK</button>
+                    <button class="pixel-btn green" id="settingsStartBtn">START GAME</button>
                 </div>
             </div>
-
-            <div class="settings-group">
-                <span class="settings-label">DIFFICULTY</span>
-                <div class="diff-selector-row">
-                    <button class="diff-btn easy" data-diff="easy">EASY</button>
-                    <button class="diff-btn easy-plus" data-diff="easy+">EASY+</button>
-                    <button class="diff-btn normal" data-diff="normal">NORMAL</button>
-                    <button class="diff-btn normal-plus active" data-diff="normal+">NORMAL+</button>
-                </div>
-            </div>
-
-            <div class="settings-group">
-                <span class="settings-label">NOTE STYLE</span>
-                <div class="style-selector-row">
-                    <button class="style-btn" data-style="pixel">
-                        <span class="preview"><span class="preview-pixel"></span></span>
-                        <span>PIXEL</span>
-                    </button>
-                    <button class="style-btn active" data-style="orb">
-                        <span class="preview"><span class="preview-orb"></span></span>
-                        <span>ORB</span>
-                    </button>
-                </div>
-            </div>
-
-            <div class="settings-group">
-                <span class="settings-label">SPEED</span>
-                <div class="btn-row" style="justify-content: center;">
-                    <button class="pixel-btn pink" id="speedDown" style="max-width: 50px; flex: 0 0 50px;">-</button>
-                    <span class="speed-value" style="min-width: 60px; text-align: center; align-self: center; color: var(--pixel-yellow);" id="speedValue">16.0</span>
-                    <button class="pixel-btn pink" id="speedUp" style="max-width: 50px; flex: 0 0 50px;">+</button>
-                </div>
-            </div>
-
-            <button class="pixel-btn green" id="backBtn" style="margin-top: 10px;">BACK</button>
         </div>
     </div>
 
-    <!-- Result Screen -->
+    <!-- ==================== 结果画面 ==================== -->
     <div id="resultScreen" class="screen hidden">
-        <div class="result-content">
-            <div class="pixel-box">
+        <div class="result-overlay">
+            <div class="result-card">
                 <div class="rank" id="rankDisplay">S</div>
+                
                 <div class="stats-grid">
                     <div class="stat-box">
-                        <div class="stat-label">SCORE</div>
-                        <div class="stat-value" id="finalScore">0</div>
+                        <span class="stat-label">SCORE</span>
+                        <span class="stat-value" id="finalScore">0</span>
                     </div>
                     <div class="stat-box">
-                        <div class="stat-label">MAX COMBO</div>
-                        <div class="stat-value" id="finalCombo">0</div>
+                        <span class="stat-label">MAX COMBO</span>
+                        <span class="stat-value" id="finalCombo">0</span>
                     </div>
                     <div class="stat-box">
-                        <div class="stat-label">ACC</div>
-                        <div class="stat-value" id="finalAccuracy">0%</div>
+                        <span class="stat-label">ACC</span>
+                        <span class="stat-value" id="finalAccuracy">0%</span>
                     </div>
                     <div class="stat-box p">
-                        <div class="stat-label">PERFECT</div>
-                        <div class="stat-value" id="finalPerfect">0</div>
+                        <span class="stat-label">PERFECT</span>
+                        <span class="stat-value" id="finalPerfect">0</span>
                     </div>
                     <div class="stat-box g">
-                        <div class="stat-label">GREAT</div>
-                        <div class="stat-value" id="finalGreat">0</div>
+                        <span class="stat-label">GREAT</span>
+                        <span class="stat-value" id="finalGreat">0</span>
                     </div>
                     <div class="stat-box m">
-                        <div class="stat-label">MISS</div>
-                        <div class="stat-value" id="finalMiss">0</div>
+                        <span class="stat-label">MISS</span>
+                        <span class="stat-value" id="finalMiss">0</span>
                     </div>
                 </div>
+                
                 <div class="chart-box">
                     <span class="chart-title">PERFORMANCE</span>
                     <canvas id="lineChartCanvas"></canvas>
                 </div>
+                
                 <div class="result-actions">
                     <button class="pixel-btn purple" id="exportBtn">EXPORT RESULT</button>
                     <button class="pixel-btn green" id="homeBtn">HOME</button>
@@ -141,17 +183,16 @@
         </div>
     </div>
 
-    <!-- Mobile Controls -->
+    <!-- ==================== 移动端控制 ==================== -->
     <div id="mobileControls">
         <div class="mobile-btns">
-            <div class="mobile-btn" data-key="d">D<span></span></div>
-            <div class="mobile-btn" data-key="f">F<span></span></div>
-            <div class="mobile-btn" data-key="j">J<span></span></div>
-            <div class="mobile-btn" data-key="k">K<span></span></div>
+            <div class="mobile-btn" data-key="d">D</div>
+            <div class="mobile-btn" data-key="f">F</div>
+            <div class="mobile-btn" data-key="j">J</div>
+            <div class="mobile-btn" data-key="k">K</div>
         </div>
     </div>
 
-    <!-- Scripts -->
     <script src="js/config.js"></script>
     <script src="js/game-state.js"></script>
     <script src="js/audio-engine.js"></script>
