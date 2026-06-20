@@ -1,4 +1,4 @@
-// ==================== Canvas 渲染器 (现代简约风格) ====================
+// ==================== Canvas 渲染器 (宽轨道 + 倒计时 + 完整皮肤) ====================
 
 class Renderer {
     constructor(canvas, ctx) {
@@ -9,17 +9,18 @@ class Renderer {
         this.trackStartX = 0;
         this.resize();
     }
-    
+
     resize() {
         this.canvasWidth = window.innerWidth;
         this.canvasHeight = window.innerHeight;
         this.canvas.width = this.canvasWidth;
         this.canvas.height = this.canvasHeight;
-        const totalTrackWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * 8;
+
+        const totalTrackWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * CONFIG.trackSpacing;
         this.trackStartX = (this.canvasWidth - totalTrackWidth) / 2;
         this.ctx.imageSmoothingEnabled = true;
     }
-    
+
     drawBackground(time) {
         const ctx = this.ctx;
         const grad = ctx.createLinearGradient(0, 0, 0, this.canvasHeight);
@@ -28,14 +29,14 @@ class Renderer {
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
-    
+
     drawTracks() {
         const ctx = this.ctx;
         const judgmentY = this.canvasHeight * CONFIG.judgmentLineY;
-        
+
         for (let i = 0; i < CONFIG.trackCount; i++) {
-            const x = this.trackStartX + i * (CONFIG.trackWidth + 8);
-            
+            const x = this.trackStartX + i * (CONFIG.trackWidth + CONFIG.trackSpacing);
+
             // 轨道虚线
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
             ctx.lineWidth = 1;
@@ -45,23 +46,23 @@ class Renderer {
             ctx.lineTo(x, this.canvasHeight);
             ctx.stroke();
             ctx.setLineDash([]);
-            
+
             const keyY = this.canvasHeight - 60;
             const isPressed = gameState.pressedKeys.has(KEYS[i]);
-            
+
             // 按键背景
             ctx.fillStyle = isPressed ? TRACK_COLORS[i] : 'rgba(255, 255, 255, 0.05)';
             ctx.beginPath();
             ctx.roundRect(x, keyY, CONFIG.trackWidth, 40, 8);
             ctx.fill();
-            
+
             // 按键边框
             ctx.strokeStyle = isPressed ? TRACK_COLORS[i] : 'rgba(255, 255, 255, 0.2)';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.roundRect(x, keyY, CONFIG.trackWidth, 40, 8);
             ctx.stroke();
-            
+
             // 按键文字
             ctx.fillStyle = isPressed ? '#000' : 'rgba(255, 255, 255, 0.7)';
             ctx.font = 'bold 16px sans-serif';
@@ -69,23 +70,25 @@ class Renderer {
             ctx.textBaseline = 'middle';
             ctx.fillText(TRACK_KEYS[i], x + CONFIG.trackWidth / 2, keyY + 20);
         }
-        
+
         // 判定线
+        const totalWidth = CONFIG.trackWidth * CONFIG.trackCount + CONFIG.trackSpacing * (CONFIG.trackCount - 1);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.fillRect(this.trackStartX - 10, judgmentY - 1, (CONFIG.trackWidth * 4) + (8 * 3) + 20, 2);
+        ctx.fillRect(this.trackStartX - 10, judgmentY - 1, totalWidth + 20, 2);
     }
-    
+
     drawNotes(currentTime) {
         const judgmentY = this.canvasHeight * CONFIG.judgmentLineY;
         const speedMultiplier = noteSpeed * 100;
-        
+
         for (let i = 0; i < gameState.notes.length; i++) {
             const note = gameState.notes[i];
             if (note.hit) continue;
-            
+
             const timeDiff = note.time - currentTime;
             const y = judgmentY - (timeDiff / 1000) * speedMultiplier;
-            
+
+            // Miss 判定
             if (y > this.canvasHeight + 100) {
                 if (!note.missed) {
                     note.missed = true;
@@ -99,25 +102,31 @@ class Renderer {
                 continue;
             }
             if (y < -50) continue;
-            
+
             note.y = y;
-            const x = this.trackStartX + note.track * (CONFIG.trackWidth + 8);
-            // 使用全局 noteStyle 变量决定绘制方式
-            this.drawModernNote(x, y, TRACK_COLORS[note.track], noteStyle);
+            const x = this.trackStartX + note.track * (CONFIG.trackWidth + CONFIG.trackSpacing);
+            // 关键：根据全局 noteStyle 变量绘制不同皮肤
+            this.drawNoteByStyle(x, y, TRACK_COLORS[note.track], noteStyle);
         }
     }
-    
-    drawModernNote(x, y, color, style) {
+
+    /**
+     * 根据皮肤类型绘制音符
+     * @param {number} x 音符 X 坐标
+     * @param {number} y 音符 Y 坐标
+     * @param {string} color 音符颜色
+     * @param {'pixel'|'orb'} style 皮肤类型
+     */
+    drawNoteByStyle(x, y, color, style) {
         const ctx = this.ctx;
         const w = CONFIG.trackWidth - 4;
         const h = 24;
-        
+
         if (style === 'orb') {
-            // 胶囊形（全圆角）
-            const centerY = y + h / 2;
+            // 球皮：胶囊形（全圆角）
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.roundRect(x + 2, y, w, h, 12);  // 圆角半径约一半高，形成胶囊
+            ctx.roundRect(x + 2, y, w, h, 12); // 圆角半径 = 半高，形成胶囊
             ctx.fill();
             // 高光
             ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
@@ -125,16 +134,46 @@ class Renderer {
             ctx.roundRect(x + 6, y + 4, w - 12, h / 3, 6);
             ctx.fill();
         } else {
-            // 砖块风格：圆角矩形，顶部高光
+            // 砖皮：圆角矩形带顶部高光
             ctx.fillStyle = color;
             ctx.beginPath();
             ctx.roundRect(x + 2, y, w, h, 6);
             ctx.fill();
+            // 顶部高光条
             ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
             ctx.fillRect(x + 2, y, w, 3);
         }
     }
-    
+
+    drawCountdown(secondsLeft) {
+        if (secondsLeft <= 0) return;
+        const ctx = this.ctx;
+        const centerX = this.canvasWidth / 2;
+        const centerY = this.canvasHeight / 2 - 30;
+
+        // 半透明背景
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 55, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 倒计时数字
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 52px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const display = Math.ceil(secondsLeft);
+        ctx.fillText(display.toString(), centerX, centerY + 2);
+
+        // 圆环进度
+        ctx.strokeStyle = '#4dabf7';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        const progress = 1 - (secondsLeft / (CONFIG.countdownDuration / 1000));
+        ctx.arc(centerX, centerY, 50, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+        ctx.stroke();
+    }
+
     drawLasers() {
         for (let i = gameState.lasers.length - 1; i >= 0; i--) {
             const laser = gameState.lasers[i];
@@ -148,7 +187,7 @@ class Renderer {
         }
         this.ctx.globalAlpha = 1.0;
     }
-    
+
     drawParticles() {
         for (let i = gameState.particles.length - 1; i >= 0; i--) {
             const p = gameState.particles[i];
@@ -164,7 +203,7 @@ class Renderer {
         }
         this.ctx.globalAlpha = 1.0;
     }
-    
+
     drawJudgments() {
         const ctx = this.ctx;
         for (let i = gameState.judgments.length - 1; i >= 0; i--) {
@@ -173,26 +212,27 @@ class Renderer {
             j.alpha -= 0.02;
             if (j.bounce > 1.0) j.bounce -= 0.05;
             if (j.alpha <= 0) { gameState.judgments.splice(i, 1); continue; }
-            
-            const x = this.trackStartX + j.track * (CONFIG.trackWidth + 8) + CONFIG.trackWidth / 2;
+
+            const x = this.trackStartX + j.track * (CONFIG.trackWidth + CONFIG.trackSpacing) + CONFIG.trackWidth / 2;
             ctx.globalAlpha = j.alpha;
             ctx.font = `bold ${Math.round(14 * j.bounce)}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            
+
             if (j.text === 'PERFECT') ctx.fillStyle = '#ffd43b';
             else if (j.text === 'GREAT') ctx.fillStyle = '#69db7c';
             else ctx.fillStyle = '#ff6b6b';
-            
+
             ctx.fillText(j.text, x, j.y);
         }
         ctx.globalAlpha = 1.0;
     }
-    
+
     drawHUD() {
         const ctx = this.ctx;
         ctx.save();
-        
+
+        // 分数
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'left';
@@ -201,7 +241,8 @@ class Renderer {
         ctx.font = 'bold 28px sans-serif';
         ctx.fillStyle = '#4dabf7';
         ctx.fillText(gameState.score.toLocaleString(), 30, 55);
-        
+
+        // 血条
         const hX = this.canvasWidth - 180;
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         ctx.beginPath();
@@ -212,7 +253,8 @@ class Renderer {
         ctx.beginPath();
         ctx.roundRect(hX, 25, Math.max(0, 140 * gameState.health / 100), 14, 7);
         ctx.fill();
-        
+
+        // 连击
         if (gameState.combo > 0) {
             ctx.font = 'bold 36px sans-serif';
             ctx.textAlign = 'center';
@@ -222,7 +264,8 @@ class Renderer {
             ctx.fillStyle = '#aaaaaa';
             ctx.fillText('COMBO', this.canvasWidth / 2, this.canvasHeight / 2 + 22);
         }
-        
+
+        // 统计数据
         ctx.font = '13px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffd43b';
@@ -231,14 +274,14 @@ class Renderer {
         ctx.fillText('G:' + gameState.great, 130, 100);
         ctx.fillStyle = '#ff6b6b';
         ctx.fillText('M:' + gameState.miss, 230, 100);
-        
+
         const acc = gameState.calculateTotalAcc();
         ctx.fillStyle = '#ffffff';
         ctx.fillText('ACC:' + acc.toFixed(2) + '%', 30, 125);
-        
+
         ctx.restore();
     }
-    
+
     drawLineChart(historyData) {
         const chartCanvas = document.getElementById('lineChartCanvas');
         if (!chartCanvas) return;
@@ -250,22 +293,22 @@ class Renderer {
         chartCanvas.width = w;
         chartCanvas.height = h;
         cCtx.clearRect(0, 0, w, h);
-        
+
         if (historyData.length === 0) return;
         const leftMargin = 40, topMargin = 20, bottomMargin = 20, rightMargin = 10;
         const chartW = w - leftMargin - rightMargin;
         const chartH = h - topMargin - bottomMargin;
-        
+
         cCtx.fillStyle = 'rgba(255,255,255,0.05)';
         cCtx.fillRect(0, 0, w, h);
-        
+
         cCtx.fillStyle = 'rgba(255,255,255,0.5)';
         cCtx.font = '10px sans-serif';
         cCtx.textAlign = 'right';
         cCtx.fillText('100%', leftMargin - 4, topMargin);
-        cCtx.fillText('50%', leftMargin - 4, topMargin + chartH/2);
+        cCtx.fillText('50%', leftMargin - 4, topMargin + chartH / 2);
         cCtx.fillText('0%', leftMargin - 4, topMargin + chartH);
-        
+
         const pointSpacing = historyData.length > 1 ? chartW / (historyData.length - 1) : 0;
         cCtx.strokeStyle = '#4dabf7';
         cCtx.lineWidth = 2;
@@ -278,17 +321,17 @@ class Renderer {
         });
         cCtx.stroke();
     }
-    
+
     createMissEffect(y, track) {
         gameState.judgments.push({ text: 'MISS', y: y - 40, track, alpha: 1, scale: 1.0, bounce: 1.0 });
     }
-    
+
     addJudgment(text, y, track) {
         gameState.judgments.push({ text, y: y - 40, track, alpha: 1, scale: 1.0, bounce: 1.2 });
     }
-    
+
     createHitParticles(y, track, color) {
-        const x = this.trackStartX + track * (CONFIG.trackWidth + 8) + CONFIG.trackWidth / 2;
+        const x = this.trackStartX + track * (CONFIG.trackWidth + CONFIG.trackSpacing) + CONFIG.trackWidth / 2;
         for (let i = 0; i < 6; i++) {
             const angle = (Math.PI * 2 * i) / 6;
             gameState.particles.push({
@@ -301,14 +344,14 @@ class Renderer {
             });
         }
     }
-    
+
     createLaser(track) {
-        const x = this.trackStartX + track * (CONFIG.trackWidth + 8) + CONFIG.trackWidth / 2;
+        const x = this.trackStartX + track * (CONFIG.trackWidth + CONFIG.trackSpacing) + CONFIG.trackWidth / 2;
         gameState.lasers.push({ x, width: 4, height: 0, color: TRACK_COLORS[track], alpha: 0.8 });
     }
 }
 
-// 工具：Canvas roundRect polyfill
+// roundRect polyfill
 if (!CanvasRenderingContext2D.prototype.roundRect) {
     CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
         if (typeof r === 'number') r = { tl: r, tr: r, br: r, bl: r };

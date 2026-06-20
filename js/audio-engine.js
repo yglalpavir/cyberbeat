@@ -2,6 +2,7 @@ class AudioEngine {
     constructor() {
         this.context = null;
         this.masterGain = null;
+        this.limiter = null;
         this.isPlaying = false;
         this.nextNoteTime = 0;
         this.timerID = null;
@@ -14,11 +15,32 @@ class AudioEngine {
     init() {
         if (this.context) return;
         this.context = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // 从 AUDIO_CONFIG 读取 limiter 配置
+        const limiterCfg = getLimiterConfig();
+        
+        // 创建 limiter（DynamicsCompressorNode 配置成限制器模式）
+        if (limiterCfg.enabled) {
+            this.limiter = this.context.createDynamicsCompressor();
+            this.limiter.threshold.value = limiterCfg.threshold;
+            this.limiter.knee.value = limiterCfg.knee;
+            this.limiter.ratio.value = limiterCfg.ratio;
+            this.limiter.attack.value = limiterCfg.attack;
+            this.limiter.release.value = limiterCfg.release;
+        }
+        
         this.masterGain = this.context.createGain();
-        // 初始音量使用全局 currentVolume（若未定义则使用默认值）
+        // 音量映射：0-10 → 0-1
         const vol = (typeof currentVolume !== 'undefined') ? currentVolume : CONFIG.defaultVolume;
-        this.masterGain.gain.value = vol / 100;
-        this.masterGain.connect(this.context.destination);
+        this.masterGain.gain.value = vol / 10;
+        
+        // 信号链：masterGain → [limiter] → destination
+        if (this.limiter) {
+            this.masterGain.connect(this.limiter);
+            this.limiter.connect(this.context.destination);
+        } else {
+            this.masterGain.connect(this.context.destination);
+        }
     }
     
     createReverbImpulse(duration, decay, reverse) {
@@ -37,11 +59,12 @@ class AudioEngine {
     
     playNote(freq, duration, type = 'square', time = 0) {
         if (!this.context) return;
+        const presetCfg = getPresetMusicConfig();
         const osc = this.context.createOscillator();
         const gain = this.context.createGain();
         osc.type = type;
         osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0.3, this.context.currentTime + time);
+        gain.gain.setValueAtTime(presetCfg.noteGain, this.context.currentTime + time);
         gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + time + duration);
         osc.connect(gain);
         gain.connect(this.masterGain);
@@ -51,37 +74,39 @@ class AudioEngine {
     
     playMidiNote(noteNumber, duration, velocity) {
         if (!this.context) return;
+        const midiCfg = getMidiConfig();
         const freq = 440 * Math.pow(2, (noteNumber - 69) / 12);
-        const type = noteNumber < 60 ? 'triangle' : 'square';
+        const type = noteNumber < midiCfg.lowNoteThreshold ? midiCfg.lowNoteType : midiCfg.highNoteType;
         const osc = this.context.createOscillator();
         const gain = this.context.createGain();
-        const vol = (velocity / 127) * 0.5;
+        const vol = (velocity / midiCfg.maxVelocity) * midiCfg.velocityGain;
         osc.type = type;
         osc.frequency.value = freq;
         gain.gain.setValueAtTime(0, this.context.currentTime);
-        gain.gain.linearRampToValueAtTime(vol, this.context.currentTime + 0.02);
+        gain.gain.linearRampToValueAtTime(vol, this.context.currentTime + midiCfg.noteOnRampTime);
         gain.gain.setValueAtTime(vol, this.context.currentTime + duration);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + duration + 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + duration + midiCfg.noteOffRampTime);
         osc.connect(gain);
         gain.connect(this.masterGain);
         osc.start();
-        osc.stop(this.context.currentTime + duration + 0.2);
+        osc.stop(this.context.currentTime + duration + midiCfg.noteStopPadding);
     }
     
     playHitSound(type) {
         if (!this.context) return;
+        const hitCfg = getHitSoundConfig();
         const osc = this.context.createOscillator();
         const gain = this.context.createGain();
         osc.type = 'square';
-        if (type === 'perfect') osc.frequency.value = 1200;
-        else if (type === 'great') osc.frequency.value = 900;
-        else osc.frequency.value = 200;
-        gain.gain.setValueAtTime(0.2, this.context.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + 0.1);
+        if (type === 'perfect') osc.frequency.value = hitCfg.perfectFreq;
+        else if (type === 'great') osc.frequency.value = hitCfg.greatFreq;
+        else osc.frequency.value = hitCfg.missFreq;
+        gain.gain.setValueAtTime(hitCfg.gain, this.context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + hitCfg.duration);
         osc.connect(gain);
         gain.connect(this.masterGain);
         osc.start();
-        osc.stop(this.context.currentTime + 0.1);
+        osc.stop(this.context.currentTime + hitCfg.duration);
     }
     
     startPresetMusic() {
@@ -90,29 +115,28 @@ class AudioEngine {
         this.isPlaying = true;
         this.nextNoteTime = this.context.currentTime;
         this.masterGain.disconnect();
-        this.masterGain.connect(this.context.destination);
-        // 同步音量
-        this.masterGain.gain.value = (typeof currentVolume !== 'undefined' ? currentVolume : CONFIG.defaultVolume) / 100;
+        this.masterGain.connect(this.limiter || this.context.destination);
+        this.masterGain.gain.value = (typeof currentVolume !== 'undefined' ? currentVolume : CONFIG.defaultVolume) / 10;
         this.scheduler();
     }
     
     scheduler() {
-        while (this.nextNoteTime < this.context.currentTime + 0.1) this.scheduleNote();
-        if (this.isPlaying) this.timerID = setTimeout(() => this.scheduler(), 20);
+        const presetCfg = getPresetMusicConfig();
+        while (this.nextNoteTime < this.context.currentTime + presetCfg.presetSchedulerLookAhead) this.scheduleNote();
+        if (this.isPlaying) this.timerID = setTimeout(() => this.scheduler(), presetCfg.presetSchedulerInterval);
     }
     
     scheduleNote() {
+        const presetCfg = getPresetMusicConfig();
         const beatDuration = 60 / CONFIG.bpm;
         const barBeat = gameState.beatIndex % 16;
         if (barBeat === 0 || barBeat === 4 || barBeat === 8 || barBeat === 12) this.playKick(0);
         if (barBeat % 2 === 0) this.playHiHat(0);
         if (barBeat === 0 || barBeat === 4 || barBeat === 8 || barBeat === 12) {
-            const bassFreqs = [110, 130, 146, 164];
-            this.playNote(bassFreqs[Math.floor(gameState.beatIndex / 16) % 4], 0.1, 'triangle');
+            this.playNote(presetCfg.bassFreqs[Math.floor(gameState.beatIndex / 16) % 4], presetCfg.bassDuration, 'triangle');
         }
         if (barBeat % 2 === 0) {
-            const leadFreqs = [440, 523, 659, 784];
-            this.playNote(leadFreqs[Math.floor(gameState.beatIndex / 2) % 4], 0.05, 'square');
+            this.playNote(presetCfg.leadFreqs[Math.floor(gameState.beatIndex / 2) % 4], presetCfg.leadDuration, 'square');
         }
         this.nextNoteTime += beatDuration / 4;
         gameState.beatIndex++;
@@ -120,30 +144,32 @@ class AudioEngine {
     
     playKick(time) {
         if (!this.context) return;
+        const presetCfg = getPresetMusicConfig();
         const osc = this.context.createOscillator();
         const gain = this.context.createGain();
         osc.type = 'triangle';
-        osc.frequency.setValueAtTime(200, this.context.currentTime + time);
-        osc.frequency.exponentialRampToValueAtTime(50, this.context.currentTime + time + 0.1);
-        gain.gain.setValueAtTime(0.5, this.context.currentTime + time);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + time + 0.15);
+        osc.frequency.setValueAtTime(presetCfg.kickFreqStart, this.context.currentTime + time);
+        osc.frequency.exponentialRampToValueAtTime(presetCfg.kickFreqEnd, this.context.currentTime + time + presetCfg.kickDuration);
+        gain.gain.setValueAtTime(presetCfg.kickGain, this.context.currentTime + time);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + time + presetCfg.kickDuration);
         osc.connect(gain);
         gain.connect(this.masterGain);
         osc.start(this.context.currentTime + time);
-        osc.stop(this.context.currentTime + time + 0.15);
+        osc.stop(this.context.currentTime + time + presetCfg.kickDuration);
     }
     
     playHiHat(time) {
         if (!this.context) return;
-        const bufferSize = this.context.sampleRate * 0.02;
+        const presetCfg = getPresetMusicConfig();
+        const bufferSize = this.context.sampleRate * presetCfg.hiHatDuration;
         const buffer = this.context.createBuffer(1, bufferSize, this.context.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
         const noise = this.context.createBufferSource();
         const gain = this.context.createGain();
         noise.buffer = buffer;
-        gain.gain.setValueAtTime(0.1, this.context.currentTime + time);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + time + 0.02);
+        gain.gain.setValueAtTime(presetCfg.hiHatGain, this.context.currentTime + time);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + time + presetCfg.hiHatDuration);
         noise.connect(gain);
         gain.connect(this.masterGain);
         noise.start(this.context.currentTime + time);
@@ -156,44 +182,52 @@ class AudioEngine {
         this.midiEvents = events;
         this.midiStartTime = this.context.currentTime;
         this.masterGain.disconnect();
+        const reverbCfg = getReverbConfig();
         if (!this.convolver) {
             this.convolver = this.context.createConvolver();
-            this.convolver.buffer = this.createReverbImpulse(3.5, 2.5, false);
+            this.convolver.buffer = this.createReverbImpulse(reverbCfg.duration, reverbCfg.decay, false);
+            // convolver → limiter（混响信号也经过 limiter 保护）
+            this.convolver.connect(this.limiter || this.context.destination);
         }
-        this.masterGain.connect(this.context.destination);
-        this.convolver.connect(this.context.destination);
+        // masterGain → limiter / destination（干信号）
+        this.masterGain.connect(this.limiter || this.context.destination);
+        // masterGain → convolver（混响发送）
         this.masterGain.connect(this.convolver);
-        // 关键修复：显式同步当前全局音量到 masterGain
-        this.masterGain.gain.value = (typeof currentVolume !== 'undefined' ? currentVolume : CONFIG.defaultVolume) / 100;
+        // 同步当前全局音量
+        this.masterGain.gain.value = (typeof currentVolume !== 'undefined' ? currentVolume : CONFIG.defaultVolume) / 10;
         this.midiScheduler();
     }
     
     midiScheduler() {
         if (!this.isPlaying) return;
+        const midiCfg = getMidiConfig();
         const currentTime = this.context.currentTime - this.midiStartTime;
         while (this.midiEvents.length > 0) {
             const event = this.midiEvents[0];
-            if (event.time <= currentTime + 0.1) {
+            if (event.time <= currentTime + midiCfg.schedulerLookAhead) {
                 this.midiEvents.shift();
                 if (event.type === 'noteOn') this.playMidiNote(event.noteNumber, event.duration, event.velocity);
             } else break;
         }
-        this.midiScheduleTimer = setTimeout(() => this.midiScheduler(), 25);
+        this.midiScheduleTimer = setTimeout(() => this.midiScheduler(), midiCfg.schedulerInterval);
     }
     
     stopMusic() {
         this.isPlaying = false;
         if (this.timerID) clearTimeout(this.timerID);
         if (this.midiScheduleTimer) clearTimeout(this.midiScheduleTimer);
-        if (this.masterGain && this.convolver) {
-            try { this.masterGain.disconnect(this.convolver); } catch (e) {}
+        if (this.masterGain) {
+            try { this.masterGain.disconnect(); } catch (e) {}
+            if (this.limiter) {
+                try { this.limiter.disconnect(); } catch (e) {}
+            }
         }
     }
     
-    // 设置音量 (0-100)
-    setVolume(percent) {
+    // 设置音量 (0-10)
+    setVolume(level) {
         if (this.masterGain) {
-            this.masterGain.gain.value = percent / 100;
+            this.masterGain.gain.value = level / 10;
         }
     }
 }

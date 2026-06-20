@@ -10,10 +10,10 @@ class UIManager {
         this.updateSpeedDisplay();
         this.updateStartButtons();
 
-        // 初始化音量
+        // 初始化音量（0-10）
         this.setVolume(CONFIG.defaultVolume);
         if (this.volumeSlider) this.volumeSlider.value = CONFIG.defaultVolume;
-        if (this.volumeValue) this.volumeValue.textContent = CONFIG.defaultVolume + '%';
+        if (this.volumeValue) this.volumeValue.textContent = CONFIG.defaultVolume + '/10';
     }
 
     // ========== DOM 缓存 ==========
@@ -80,14 +80,18 @@ class UIManager {
         // 速度
         const speedUpBtn = document.getElementById('speedUp');
         const speedDownBtn = document.getElementById('speedDown');
-        if (speedUpBtn) speedUpBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.changeSpeed(SPEED_STEP);
-        });
-        if (speedDownBtn) speedDownBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.changeSpeed(-SPEED_STEP);
-        });
+        if (speedUpBtn) {
+            speedUpBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.changeSpeed(SPEED_STEP);
+            });
+        }
+        if (speedDownBtn) {
+            speedDownBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.changeSpeed(-SPEED_STEP);
+            });
+        }
 
         // 难度
         document.querySelectorAll('.diff-btn').forEach(btn => {
@@ -171,7 +175,6 @@ class UIManager {
         card.className = 'song-card';
         card.dataset.songIndex = index;
 
-        // 内部结构
         card.innerHTML = `
             <div class="card-body">
                 <div class="card-icon">🎵</div>
@@ -363,6 +366,7 @@ class UIManager {
             alert('Please select a song first.');
             return;
         }
+
         if (!loadedMidiData) {
             alert('No MIDI data loaded. Please select a song or import a MIDI file first.');
             return;
@@ -378,15 +382,28 @@ class UIManager {
 
         // 重置游戏状态
         gameState.reset();
-        gameState.initForGame(notes);
 
-        // 开始播放音频
-        audioEngine.startMidiMusic([...loadedMidiData.events]);
+        // 设置未来时间实现倒计时（谱面时间从倒计时结束时开始计算）
+        const countdownMs = CONFIG.countdownDuration;
+        gameState.startTime = performance.now() + countdownMs;
+
+        // 手动设置游戏状态（不使用 initForGame 以兼容倒计时）
+        gameState.screen = 'game';
+        gameState.notes = notes;
+        gameState.isPlaying = true;
+        gameState.intervalStartTime = performance.now() + countdownMs;
+
+        // 延迟启动 MIDI 音乐
+        setTimeout(() => {
+            audioEngine.startMidiMusic([...loadedMidiData.events]);
+        }, countdownMs);
 
         // 确保 Canvas 尺寸正确
-        if (renderer) renderer.resize();
+        if (renderer) {
+            renderer.resize();
+        }
 
-        // 启动游戏循环 (全局函数，来自 main.js)
+        // 启动游戏循环
         requestAnimationFrame(gameLoop);
     }
 
@@ -479,7 +496,10 @@ class UIManager {
     }
 
     setNoteStyle(style) {
+        // 关键：更新全局 noteStyle 变量
         noteStyle = style;
+
+        // 更新按钮的 active 状态
         document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
         const btn = document.querySelector(`.style-btn[data-style="${style}"]`);
         if (btn) btn.classList.add('active');
@@ -491,11 +511,18 @@ class UIManager {
         }
     }
 
-    // 音量控制 (0-100)
-    setVolume(percent) {
-        currentVolume = Math.max(0, Math.min(100, percent));
+    // ========== 音量控制 ==========
+    setVolume(level) {
+        // 限制在 0-10 范围
+        currentVolume = Math.max(0, Math.min(10, level));
+
+        // 同步到音频引擎
         audioEngine.setVolume(currentVolume);
-        if (this.volumeValue) this.volumeValue.textContent = currentVolume + '%';
+
+        // 更新显示
+        if (this.volumeValue) {
+            this.volumeValue.textContent = currentVolume + '/10';
+        }
     }
 
     // ========== 键盘控制 ==========
@@ -515,7 +542,7 @@ class UIManager {
 
             // 游戏中的按键
             if (gameState.screen === 'game') {
-                // 空格键快速结束 (双击)
+                // 空格键快速结束（双击）
                 if (key === ' ') {
                     e.preventDefault();
                     const now = performance.now();
@@ -567,8 +594,13 @@ class UIManager {
 
     // ========== 打击判定 ==========
     checkHit(track) {
+        if (!renderer) return false;
+
         const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
         const currentTime = performance.now() - gameState.startTime;
+
+        // 倒计时期间不判定
+        if (currentTime < 0) return false;
 
         for (let i = 0; i < gameState.notes.length; i++) {
             const note = gameState.notes[i];

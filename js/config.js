@@ -2,7 +2,8 @@
 
 const CONFIG = {
     trackCount: 4,
-    trackWidth: 64,
+    trackWidth: 80,          // 增大轨道宽度
+    trackSpacing: 12,        // 轨道间距（新增）
     judgmentLineY: 0.85,
     perfectWindow: 40,
     greatWindow: 90,
@@ -23,8 +24,11 @@ const CONFIG = {
     songListUrl: 'assets/songs/menu.json',
     songBasePath: 'assets/songs/',
     
-    // 音量默认值 (百分比)
-    defaultVolume: 25
+    // 默认音量 (0-10)
+    defaultVolume: 4,
+    
+    // 倒计时时长 (ms)
+    countdownDuration: 3000
 };
 
 // ==================== 输入映射 ====================
@@ -42,7 +46,7 @@ const SPEED_STEP = 0.5;
 
 let noteSpeed = 16.0;
 let selectedDifficulty = 'normal+';
-let noteStyle = 'orb';
+let noteStyle = 'orb';   // 'pixel' | 'orb'
 
 let songLibrary = [];
 let selectedSongSource = null;
@@ -51,5 +55,83 @@ let loadedMidiData = null;
 let importedMidiFileName = null;
 let selectedSongDisplayName = null;
 
-// 当前音量 (0-100)
+// 当前音量 (0-10)
 let currentVolume = CONFIG.defaultVolume;
+
+// ==================== 音频配置（从 data/audio.json 加载） ====================
+
+let AUDIO_CONFIG = null;
+
+async function loadAudioConfig() {
+    try {
+        const response = await fetch('data/audio.json');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        AUDIO_CONFIG = await response.json();
+        
+        // 用 audio.json 中的 defaultVolume 覆盖 CONFIG 默认值
+        if (AUDIO_CONFIG.defaultVolume !== undefined) {
+            CONFIG.defaultVolume = AUDIO_CONFIG.defaultVolume;
+            currentVolume = AUDIO_CONFIG.defaultVolume;
+        }
+        
+        console.log('Audio config loaded:', AUDIO_CONFIG);
+        return AUDIO_CONFIG;
+    } catch (err) {
+        console.warn('Failed to load data/audio.json, using built-in defaults:', err);
+        AUDIO_CONFIG = null;
+        return null;
+    }
+}
+
+// 获取 limiter 配置，返回带 fallback 默认值的对象
+function getLimiterConfig() {
+    if (AUDIO_CONFIG && AUDIO_CONFIG.limiter) {
+        return AUDIO_CONFIG.limiter;
+    }
+    return { enabled: true, threshold: -6, knee: 0, ratio: 20, attack: 0.002, release: 0.05 };
+}
+
+// 获取 MIDI 播放器配置，返回带 fallback 默认值的对象
+function getMidiConfig() {
+    if (AUDIO_CONFIG && AUDIO_CONFIG.midi) {
+        return AUDIO_CONFIG.midi;
+    }
+    return {
+        schedulerInterval: 25, schedulerLookAhead: 0.1,
+        noteOnRampTime: 0.02, noteOffRampTime: 0.15, noteStopPadding: 0.2,
+        maxVelocity: 127, velocityGain: 0.5,
+        lowNoteThreshold: 60, lowNoteType: 'triangle', highNoteType: 'square'
+    };
+}
+
+// 获取预设音乐配置
+function getPresetMusicConfig() {
+    if (AUDIO_CONFIG && AUDIO_CONFIG.presetMusic) {
+        return AUDIO_CONFIG.presetMusic;
+    }
+    return {
+        bassFreqs: [110, 130, 146, 164],
+        leadFreqs: [440, 523, 659, 784],
+        kickFreqStart: 200, kickFreqEnd: 50, kickGain: 0.5, kickDuration: 0.15,
+        hiHatGain: 0.1, hiHatDuration: 0.02,
+        bassDuration: 0.1, leadDuration: 0.05,
+        noteGain: 0.3,
+        presetSchedulerInterval: 20, presetSchedulerLookAhead: 0.1
+    };
+}
+
+// 获取混响配置
+function getReverbConfig() {
+    if (AUDIO_CONFIG && AUDIO_CONFIG.reverb) {
+        return AUDIO_CONFIG.reverb;
+    }
+    return { duration: 3.5, decay: 2.5 };
+}
+
+// 获取打击音效配置
+function getHitSoundConfig() {
+    if (AUDIO_CONFIG && AUDIO_CONFIG.hitSound) {
+        return AUDIO_CONFIG.hitSound;
+    }
+    return { perfectFreq: 1200, greatFreq: 900, missFreq: 200, duration: 0.1, gain: 0.2 };
+}

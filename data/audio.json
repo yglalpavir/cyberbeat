@@ -1,0 +1,116 @@
+{
+  "_comment": "===== CyberBeat Pixel 音频引擎配置文件 =====",
+  "_comment_desc": "所有数值参数均可在此调整，无需修改代码。修改后刷新页面即可生效。",
+
+  "_comment_limiter": "===== 音量限制器 (Limiter) =====",
+  "_comment_limiter_detail": "基于 DynamicsCompressorNode 的硬限幅器，防止音频削波失真，保护扬声器",
+  "limiter": {
+    "_comment_enabled": "是否启用限幅器。设为 false 可完全绕过 limiter",
+    "enabled": true,
+    "_comment_threshold": "阈值 (dB)。超过此电平的信号将被压缩。范围通常 -60 ~ 0，推荐 -12 ~ -3",
+    "threshold": -24,
+    "_comment_knee": "拐点平滑度 (dB)。0=硬拐点(干净利落)，越大过渡越平滑",
+    "knee": 0,
+    "_comment_ratio": "压缩比。超过阈值的信号按此比例衰减。20=接近硬限幅，1=无压缩",
+    "ratio": 20,
+    "_comment_attack": "启动时间 (秒)。信号超过阈值后多快开始压缩。越小反应越快",
+    "attack": 0.002,
+    "_comment_release": "释放时间 (秒)。信号回落到阈值后多快停止压缩。越小恢复越快",
+    "release": 0.05
+  },
+
+  "_comment_midi": "===== MIDI 播放器参数 =====",
+  "_comment_midi_detail": "控制 MIDI 音符的调度、音色选择和音量映射",
+  "midi": {
+    "_comment_schedulerInterval": "调度器轮询间隔 (ms)。越小调度越精确，但 CPU 开销越大",
+    "schedulerInterval": 25,
+    "_comment_schedulerLookAhead": "调度提前量 (秒)。提前调度未来多少秒内的音符",
+    "schedulerLookAhead": 0.1,
+    "_comment_noteOnRampTime": "起音渐入时间 (秒)。音符开始时的淡入时长，避免爆音",
+    "noteOnRampTime": 0.02,
+    "_comment_noteOffRampTime": "释音渐出时间 (秒)。音符结束时的淡出时长",
+    "noteOffRampTime": 0.15,
+    "_comment_noteStopPadding": "停止填充时间 (秒)。振荡器停止前的额外时长，确保淡出完整",
+    "noteStopPadding": 0.2,
+    "_comment_maxVelocity": "MIDI 最大力度值。标准 MIDI 为 127",
+    "maxVelocity": 127,
+    "_comment_velocityGain": "力度增益系数。实际音量 = (velocity / maxVelocity) * velocityGain",
+    "velocityGain": 0.5,
+    "_comment_lowNoteThreshold": "低音区阈值 (MIDI note)。低于此值的音符使用 lowNoteType",
+    "lowNoteThreshold": 60,
+    "_comment_lowNoteType": "低音区波形。可选: sine, square, triangle, sawtooth",
+    "lowNoteType": "sine",
+    "_comment_highNoteType": "高音区波形。可选: sine, square, triangle, sawtooth",
+    "highNoteType": "square"
+  },
+
+  "_comment_presetMusic": "===== 预设音乐参数 =====",
+  "_comment_presetMusic_detail": "未加载 MIDI 时播放的内置节拍音序器参数",
+  "presetMusic": {
+    "_comment_bassFreqs": "贝斯循环频率列表 (Hz)。4 个音按 4 小节循环",
+    "bassFreqs": [110, 130, 146, 164],
+    "_comment_leadFreqs": "主音循环频率列表 (Hz)。4 个音每 2 拍切换",
+    "leadFreqs": [440, 523, 659, 784],
+    "_comment_kickFreqStart": "底鼓起始频率 (Hz)",
+    "kickFreqStart": 200,
+    "_comment_kickFreqEnd": "底鼓结束频率 (Hz)。从 start 滑向 end 产生打击感",
+    "kickFreqEnd": 50,
+    "_comment_kickGain": "底鼓增益 (0~1)",
+    "kickGain": 0.5,
+    "_comment_kickDuration": "底鼓时长 (秒)",
+    "kickDuration": 0.15,
+    "_comment_hiHatGain": "镲片增益 (0~1)",
+    "hiHatGain": 0.1,
+    "_comment_hiHatDuration": "镲片噪声时长 (秒)",
+    "hiHatDuration": 0.02,
+    "_comment_bassDuration": "贝斯音符持续时长 (秒)",
+    "bassDuration": 0.1,
+    "_comment_leadDuration": "主音音符持续时长 (秒)",
+    "leadDuration": 0.05,
+    "_comment_noteGain": "预设音乐音符默认增益 (0~1)",
+    "noteGain": 0.3,
+    "_comment_presetSchedulerInterval": "预设音乐调度间隔 (ms)",
+    "presetSchedulerInterval": 20,
+    "_comment_presetSchedulerLookAhead": "预设音乐调度提前量 (秒)",
+    "presetSchedulerLookAhead": 0.1
+  },
+
+  "_comment_reverb": "===== 混响效果 =====",
+  "_comment_reverb_detail": "MIDI 播放时通过卷积混响模拟回响效果",
+  "reverb": {
+    "_comment_duration": "混响脉冲响应时长 (秒)。越长回响越久",
+    "duration": 3,
+    "_comment_decay": "混响衰减系数。值越大衰减越慢(混响更丰富)",
+    "decay": 2.5
+  },
+
+  "_comment_hitSound": "===== 打击音效 =====",
+  "_comment_hitSound_detail": "游戏判定 (Perfect/Great/Miss) 时的反馈音效",
+  "hitSound": {
+    "_comment_perfectFreq": "Perfect 判定音效频率 (Hz)",
+    "perfectFreq": 1200,
+    "_comment_greatFreq": "Great 判定音效频率 (Hz)",
+    "greatFreq": 900,
+    "_comment_missFreq": "Miss 判定音效频率 (Hz)",
+    "missFreq": 200,
+    "_comment_duration": "音效时长 (秒)",
+    "duration": 0.1,
+    "_comment_gain": "音效增益 (0~1)",
+    "gain": 0.2
+  },
+
+  "_comment_defaultVolume": "===== 默认音量 =====",
+  "_comment_defaultVolume_detail": "游戏启动时的初始音量，覆盖 CONFIG.defaultVolume",
+  "defaultVolume": 1,
+
+  "_comment_volume": "===== 音量滑块 UI =====",
+  "_comment_volume_detail": "音量滑块的范围和步进值",
+  "volume": {
+    "_comment_min": "最小值",
+    "min": 0,
+    "_comment_max": "最大值",
+    "max": 10,
+    "_comment_uiSteps": "UI 步进数",
+    "uiSteps": 10
+  }
+}
