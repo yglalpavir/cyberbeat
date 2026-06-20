@@ -206,6 +206,7 @@ class UIManager {
         selectedSongSource = 'library';
         selectedLibrarySong = song;
         loadedMidiData = null;
+        loadedMcData = null;
         importedMidiFileName = null;
         selectedSongDisplayName = song.title;
 
@@ -225,6 +226,7 @@ class UIManager {
             try {
                 const parser = new MidiParser(e.target.result);
                 loadedMidiData = parser.parse();
+                loadedMcData = null;
 
                 selectedSongSource = 'import';
                 selectedLibrarySong = null;
@@ -257,6 +259,7 @@ class UIManager {
         selectedSongSource = null;
         selectedLibrarySong = null;
         loadedMidiData = null;
+        loadedMcData = null;
         importedMidiFileName = null;
         selectedSongDisplayName = null;
 
@@ -308,24 +311,65 @@ class UIManager {
     async handleStartOrConfig() {
         if (!selectedSongSource) return;
 
-        // 如果选中的是曲库歌曲，需要先加载 MIDI
+        // 如果选中的是曲库歌曲，需要先加载音频
         if (selectedSongSource === 'library' && selectedLibrarySong) {
-            const loaded = await this.loadLibraryMidi();
-            if (!loaded) return;
+            // 先加载 MC beatmap（如果有）
+            if (selectedLibrarySong.beatmapType === 'mc') {
+                const mcLoaded = await this.loadLibraryMcBeatmap();
+                if (!mcLoaded) return;
+            }
+
+            // 加载音频：MC 歌曲使用 audio 字段 + mc_audio 路径，MIDI 歌曲使用 file 字段 + songs 路径
+            const song = selectedLibrarySong;
+            const isMc = song.beatmapType === 'mc';
+            const audioFile = isMc ? song.audio : song.file;
+
+            if (audioFile) {
+                const basePath = isMc ? 'assets/mc_audio/' : CONFIG.songBasePath;
+                const loaded = await this.loadAudioForSong(audioFile, basePath, song);
+                if (!loaded && !isMc) return;  // MIDI 必须加载成功
+                // MC 允许音频加载失败（回退到预设音乐）
+            }
         }
 
-        if (!loadedMidiData) {
-            alert('No MIDI data available. Please select a song or import a MIDI file.');
+        // MC 模式允许没有 MIDI（使用预设音乐），但至少要有 MC 数据
+        if (!loadedMidiData && !loadedMcData) {
+            alert('No beatmap data available. Please select a song or import a MIDI file.');
             return;
         }
 
         this.showSettings();
     }
 
-    async loadLibraryMidi() {
-        const song = selectedLibrarySong;
-        const filePath = CONFIG.songBasePath + song.file;
+    /**
+     * 通用音频加载方法
+     * @param {string} fileName - 音频文件名
+     * @param {string} basePath - 基础路径
+     * @param {Object} song - 歌曲元数据对象（用于更新 bpm/duration）
+     * @returns {Promise<boolean>}
+     */
+    async loadAudioForSong(fileName, basePath, song) {
+        const filePath = basePath + fileName;
+        const ext = fileName.split('.').pop().toLowerCase();
+        const audioExts = ['ogg', 'mp3', 'wav', 'flac', 'aac', 'm4a', 'opus'];
 
+        if (audioExts.includes(ext)) {
+            // 音频文件加载
+            try {
+                const success = await audioEngine.loadAudioFile(filePath);
+                if (success && audioEngine.audioBuffer) {
+                    song.bpm = song.bpm || 120;
+                    song.duration = formatDuration(audioEngine.audioBuffer.duration);
+                }
+                return success;
+            } catch (err) {
+                console.error('Failed to load audio file:', err);
+                alert(`Failed to load audio: ${song.title}\nPlease check that the audio file exists at:\n${filePath}`);
+                return false;
+            }
+        }
+
+        // MIDI 文件加载
         try {
             const response = await fetch(filePath);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -334,7 +378,6 @@ class UIManager {
             const parser = new MidiParser(arrayBuffer);
             loadedMidiData = parser.parse();
 
-            // 根据 MIDI 文件内容计算 bpm 和 duration，更新 song 对象
             if (loadedMidiData) {
                 song.bpm = computeAverageBpm(loadedMidiData);
                 song.duration = formatDuration(loadedMidiData.duration);
@@ -344,6 +387,63 @@ class UIManager {
         } catch (err) {
             console.error('Failed to load MIDI:', err);
             alert(`Failed to load: ${song.title}\nPlease check that the MIDI file exists at:\n${filePath}`);
+            return false;
+        }
+    }
+
+    // 保留旧方法名以兼容导入 MIDI 等其他调用处
+    async loadLibraryMidi() {
+        const song = selectedLibrarySong;
+        return this.loadAudioForSong(song.file, CONFIG.songBasePath, song);
+    }
+
+    async loadLibraryMcBeatmap() {
+        const song = selectedLibrarySong;
+        const filePath = CONFIG.songBasePath + song.beatmap;
+
+        try {
+            const response = await fetch(filePath);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const jsonData = await response.json();
+
+            // 校验 column
+            const column = jsonData?.meta?.mode_ext?.column;
+            if (column !== 4) {
+                alert(
+                    `Cannot load "${song.title}"\n\n` +
+                    `This beatmap is ${column}K, but CyberBeat only supports 4K beatmaps.\n` +
+                    `Please select a 4K chart.`
+                );
+                return false;
+            }
+
+            const parser = new McParser(jsonData);
+            loadedMcData = parser.parse();
+
+            // 用 .mc 文件中的元数据更新 song 信息
+            if (loadedMcData && loadedMcData.meta) {
+                song.bpm = loadedMcData.meta.bpm || song.bpm;
+                song.duration = formatDuration(loadedMcData.meta.duration);
+                // 如果 menu.json 中没有指定 title/artist，使用 mc 文件中的
+                if (!song.title || song.title === 'Unknown') {
+                    song.title = loadedMcData.meta.title;
+                }
+                if (!song.artist || song.artist === 'Unknown Artist') {
+                    song.artist = loadedMcData.meta.artist;
+                }
+            }
+
+            console.log('MC beatmap loaded:', loadedMcData.meta, `${loadedMcData.notes.length} notes`);
+            return true;
+        } catch (err) {
+            console.error('Failed to load MC beatmap:', err);
+            alert(
+                `Failed to load beatmap for: ${song.title}\n\n` +
+                `Error: ${err.message}\n\n` +
+                `Please check that the .mc file exists at:\n${filePath}`
+            );
+            loadedMcData = null;
             return false;
         }
     }
@@ -360,14 +460,26 @@ class UIManager {
             this.settingsSongArtist.textContent = 'Custom Import';
         }
 
-        // 显示从 MIDI 计算的 BPM 和时长
-        if (loadedMidiData) {
+        // 显示 BPM 和时长
+        let bpmText = '';
+        let durText = '';
+
+        if (loadedMcData && loadedMcData.meta) {
+            // MC 谱面：使用 MC 元数据
+            bpmText = `BPM ${loadedMcData.meta.bpm}`;
+            durText = formatDuration(loadedMcData.meta.duration);
+            if (loadedMcData.meta.version) {
+                bpmText += `  •  ${loadedMcData.meta.version}`;
+            }
+        } else if (loadedMidiData) {
+            // MIDI：使用 MIDI 计算的 BPM 和时长
             const bpm = computeAverageBpm(loadedMidiData);
             const dur = formatDuration(loadedMidiData.duration);
-            this.settingsSongMeta.textContent = `BPM ${bpm}  •  ${dur}`;
-        } else {
-            this.settingsSongMeta.textContent = '';
+            bpmText = `BPM ${bpm}`;
+            durText = dur;
         }
+
+        this.settingsSongMeta.textContent = [bpmText, durText].filter(Boolean).join('  •  ');
 
         // 根据歌曲的 difficulties 字段过滤难度按钮
         this.filterDifficultyButtons();
@@ -378,12 +490,16 @@ class UIManager {
 
     /**
      * 根据当前选中歌曲的 difficulties 数组，启用/禁用难度按钮
+     * MC 谱面不限制难度（已固定谱面）
      * 导入的 MIDI 文件默认允许全部难度
      */
     filterDifficultyButtons() {
         let allowedDiffs = null;
 
-        if (selectedSongSource === 'library' && selectedLibrarySong
+        // MC 谱面：不禁用任何难度按钮（谱面固定，难度选择不影响实际谱面）
+        if (selectedLibrarySong?.beatmapType === 'mc') {
+            allowedDiffs = null;
+        } else if (selectedSongSource === 'library' && selectedLibrarySong
             && selectedLibrarySong.difficulties && selectedLibrarySong.difficulties.length > 0) {
             allowedDiffs = selectedLibrarySong.difficulties;
         }
@@ -422,7 +538,9 @@ class UIManager {
             return;
         }
 
-        if (!loadedMidiData) {
+        const isMcMode = loadedMcData && selectedLibrarySong?.beatmapType === 'mc';
+
+        if (!loadedMidiData && !isMcMode) {
             alert('No MIDI data loaded. Please select a song or import a MIDI file first.');
             return;
         }
@@ -432,8 +550,15 @@ class UIManager {
         this.settingsScreen.classList.add('hidden');
         this.resultScreen.classList.add('hidden');
 
-        // 生成谱面
-        const notes = generateMidiBeatmap(loadedMidiData, selectedDifficulty);
+        // 生成谱面：优先使用 MC 谱面，否则用 MIDI 算法生成
+        let notes;
+        if (isMcMode) {
+            notes = loadedMcData.notes;
+            console.log(`Using MC beatmap: ${notes.length} notes`);
+        } else {
+            notes = generateMidiBeatmap(loadedMidiData, selectedDifficulty);
+            console.log(`Using MIDI-generated beatmap: ${notes.length} notes`);
+        }
 
         // 重置游戏状态
         gameState.reset();
@@ -448,9 +573,19 @@ class UIManager {
         gameState.isPlaying = true;
         gameState.intervalStartTime = performance.now() + countdownMs;
 
-        // 延迟启动 MIDI 音乐
+        // 计算音频偏移（MC 谱面的 sound offset，单位 ms）
+        const audioOffset = (loadedMcData?.meta?.audioOffset) || 0;
+
+        // 延迟启动音乐（倒计时 + 音频偏移）
         setTimeout(() => {
-            audioEngine.startMidiMusic([...loadedMidiData.events]);
+            if (loadedMidiData) {
+                audioEngine.startMidiMusic([...loadedMidiData.events]);
+            } else if (audioEngine.audioBuffer) {
+                audioEngine.startAudioPlayback(audioOffset / 1000);
+            } else {
+                CONFIG.bpm = loadedMcData?.meta?.bpm || 120;
+                audioEngine.startPresetMusic();
+            }
         }, countdownMs);
 
         // 确保 Canvas 尺寸正确
@@ -467,6 +602,9 @@ class UIManager {
         gameState.isPlaying = false;
         audioEngine.stopMusic();
         gameState.recordIntervalStats();
+        // 清除所有活跃 hold
+        gameState.activeHolds = [null, null, null, null];
+        gameState.holdReleaseTimes = [0, 0, 0, 0];
 
         const accuracy = gameState.calculateTotalAcc();
         let rank = 'C';
@@ -619,6 +757,11 @@ class UIManager {
 
         document.addEventListener('keyup', (e) => {
             const key = e.key.toLowerCase();
+            const trackIndex = KEYS.indexOf(key);
+            // Hold 释放检查
+            if (trackIndex !== -1 && gameState.screen === 'game') {
+                this.checkHoldRelease(trackIndex);
+            }
             gameState.pressedKeys.delete(key);
         });
     }
@@ -642,6 +785,10 @@ class UIManager {
             btn.addEventListener('touchend', (e) => {
                 e.preventDefault();
                 btn.classList.remove('active');
+                // Hold 释放检查
+                if (gameState.screen === 'game') {
+                    this.checkHoldRelease(index);
+                }
                 gameState.pressedKeys.delete(KEYS[index]);
             });
         });
@@ -657,25 +804,43 @@ class UIManager {
         // 倒计时期间不判定
         if (currentTime < 0) return false;
 
+        // 如果该轨道有一个在宽限期内的 hold，补按恢复（不算 miss）
+        if (gameState.holdReleaseTimes[track] > 0) {
+            const elapsed = currentTime - gameState.holdReleaseTimes[track];
+            if (elapsed <= 40) {
+                // 40ms 内补按 → 恢复 hold，不产生任何判定
+                gameState.holdReleaseTimes[track] = 0;
+                // hold 继续保持活跃（holdActive 未被清除，activeHolds 仍指向原 note）
+                return true;
+            }
+        }
+
         for (let i = 0; i < gameState.notes.length; i++) {
             const note = gameState.notes[i];
             if (note.track !== track || note.hit) continue;
 
             const timeDiff = Math.abs(currentTime - note.time);
-            if (timeDiff <= CONFIG.greatWindow) {
+            if (timeDiff > CONFIG.greatWindow) continue;
+
+            // ===== Hold 长条头部判定 =====
+            if (note.type === 'hold' && note.endTime) {
                 note.hit = true;
+                note.holdActive = true;
                 const isPerfect = timeDiff <= CONFIG.perfectWindow;
+
+                // 注册为当前轨道的活跃 hold
+                gameState.activeHolds[track] = note;
 
                 if (isPerfect) {
                     gameState.perfect++;
                     gameState.intervalStats.perfect++;
-                    gameState.score += 100 * (1 + gameState.combo * 0.1);
+                    gameState.score += 100;
                     renderer.addJudgment('PERFECT', judgmentY, track);
                     audioEngine.playHitSound('perfect');
                 } else {
                     gameState.great++;
                     gameState.intervalStats.great++;
-                    gameState.score += 50 * (1 + gameState.combo * 0.05);
+                    gameState.score += 50;
                     renderer.addJudgment('GREAT', judgmentY, track);
                     audioEngine.playHitSound('great');
                 }
@@ -688,7 +853,110 @@ class UIManager {
                 renderer.createLaser(track);
                 return true;
             }
+
+            // ===== Tap 音符判定 =====
+            note.hit = true;
+            const isPerfect = timeDiff <= CONFIG.perfectWindow;
+
+            if (isPerfect) {
+                gameState.perfect++;
+                gameState.intervalStats.perfect++;
+                gameState.score += 100 * (1 + gameState.combo * 0.1);
+                renderer.addJudgment('PERFECT', judgmentY, track);
+                audioEngine.playHitSound('perfect');
+            } else {
+                gameState.great++;
+                gameState.intervalStats.great++;
+                gameState.score += 50 * (1 + gameState.combo * 0.05);
+                renderer.addJudgment('GREAT', judgmentY, track);
+                audioEngine.playHitSound('great');
+            }
+
+            gameState.combo++;
+            gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
+            gameState.health = Math.min(100, gameState.health + 2);
+
+            renderer.createHitParticles(judgmentY, track, isPerfect ? '#ffd43b' : '#69db7c');
+            renderer.createLaser(track);
+            return true;
         }
         return false;
+    }
+
+    /**
+     * Hold 长条释放检查（keyup 时触发）
+     * 宽松判定：记录松开时间，40ms 内补按则不算 miss
+     */
+    checkHoldRelease(track) {
+        if (!renderer) return;
+
+        const currentTime = performance.now() - gameState.startTime;
+        if (currentTime < 0) return;
+
+        const holdNote = gameState.activeHolds[track];
+        if (!holdNote || !holdNote.holdActive) return;
+
+        // 检查是否在 hold 结束时间之前松开的
+        if (holdNote.endTime && currentTime < holdNote.endTime - CONFIG.greatWindow) {
+            // 记录松开时间，进入 40ms 宽限期（不立即判定 miss）
+            gameState.holdReleaseTimes[track] = currentTime;
+        }
+    }
+
+    /**
+     * 每帧调用：检查 hold 状态
+     * - 宽限期超时检查（40ms）
+     * - 尾部到达自动完成
+     */
+    updateHolds() {
+        const currentTime = performance.now() - gameState.startTime;
+        if (currentTime < 0) return;
+
+        for (let track = 0; track < 4; track++) {
+            const holdNote = gameState.activeHolds[track];
+            if (!holdNote || !holdNote.holdActive || !holdNote.endTime) {
+                // 没有活跃 hold，清空释放时间
+                gameState.holdReleaseTimes[track] = 0;
+                continue;
+            }
+
+            // 检查宽限期：如果已松开超过 40ms 且未补按 → Miss
+            const releaseTime = gameState.holdReleaseTimes[track];
+            if (releaseTime > 0) {
+                const elapsed = currentTime - releaseTime;
+                if (elapsed > 40) {
+                    // 宽限期超时 → Miss
+                    holdNote.holdActive = false;
+                    holdNote.holdReleased = true;
+                    gameState.activeHolds[track] = null;
+                    gameState.holdReleaseTimes[track] = 0;
+
+                    const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
+                    gameState.miss++;
+                    gameState.intervalStats.miss++;
+                    gameState.combo = 0;
+                    gameState.health = Math.max(0, gameState.health - 10);
+                    renderer.addJudgment('MISS', judgmentY, track);
+                    renderer.createMissEffect(judgmentY, track);
+                    audioEngine.playHitSound('miss');
+                    continue;
+                }
+            }
+
+            // Hold 尾部到达判定线 → 自动完成（即使在宽限期内也正常完成）
+            if (currentTime >= holdNote.endTime - CONFIG.greatWindow) {
+                holdNote.holdActive = false;
+                gameState.activeHolds[track] = null;
+                gameState.holdReleaseTimes[track] = 0;
+
+                const holdDuration = holdNote.endTime - holdNote.time;
+                const holdBonus = Math.floor(holdDuration / 100) * 10;
+                gameState.score += 100 + holdBonus;
+                gameState.health = Math.min(100, gameState.health + 1);
+
+                const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
+                renderer.createLaser(track);
+            }
+        }
     }
 }

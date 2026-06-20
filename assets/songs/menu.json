@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "songs": [
     {
       "id": "1",
@@ -8,6 +8,15 @@
       "artist": "onoken",
       "preview": null,
       "difficulties": ["normal", "normal+"]
+    },
+    {
+      "id": "2",
+      "audio": "Adjudicatorz-断罪-.ogg",
+      "beatmap": "Adjudicatorz-断罪-.mc",
+      "beatmapType": "mc",
+      "title": "Adjudicatorz-断罪-",
+      "artist": "JurokuNeta.",
+      "preview": null
     }
   ]
 }

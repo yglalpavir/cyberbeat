@@ -52,6 +52,7 @@ let songLibrary = [];
 let selectedSongSource = null;
 let selectedLibrarySong = null;
 let loadedMidiData = null;
+let loadedMcData = null;         // MC 谱面解析结果 { notes, meta }
 let importedMidiFileName = null;
 let selectedSongDisplayName = null;
 

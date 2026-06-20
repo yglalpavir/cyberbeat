@@ -10,6 +10,10 @@ class AudioEngine {
         this.midiEvents = [];
         this.midiStartTime = 0;
         this.convolver = null;
+        // 音频文件播放
+        this.audioBuffer = null;
+        this.audioSource = null;
+        this.audioStartTime = 0;
     }
     
     init() {
@@ -212,10 +216,70 @@ class AudioEngine {
         this.midiScheduleTimer = setTimeout(() => this.midiScheduler(), midiCfg.schedulerInterval);
     }
     
+    // ========== 音频文件播放 ==========
+
+    /**
+     * 加载音频文件（.ogg / .mp3 / .wav）
+     * @param {string} url - 音频文件路径
+     * @returns {Promise<boolean>} 是否加载成功
+     */
+    async loadAudioFile(url) {
+        this.init();
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            this.audioBuffer = await this.context.decodeAudioData(arrayBuffer);
+            console.log('Audio file loaded:', url, `duration: ${this.audioBuffer.duration.toFixed(1)}s`);
+            return true;
+        } catch (err) {
+            console.error('Failed to load audio file:', url, err);
+            this.audioBuffer = null;
+            return false;
+        }
+    }
+
+    /**
+     * 播放已加载的音频文件
+     * @param {number} delaySeconds - 延迟秒数后播放
+     */
+    startAudioPlayback(delaySeconds = 0) {
+        if (!this.context || !this.audioBuffer) return;
+        if (this.context.state === 'suspended') this.context.resume();
+        this.isPlaying = true;
+
+        this.audioSource = this.context.createBufferSource();
+        this.audioSource.buffer = this.audioBuffer;
+
+        // 连接：audioSource → masterGain → [limiter] → destination
+        this.audioSource.connect(this.masterGain);
+
+        const startTime = this.context.currentTime + delaySeconds;
+        this.audioStartTime = startTime;
+        this.audioSource.start(startTime);
+
+        console.log(`Audio playback starting in ${delaySeconds}s`);
+    }
+
+    /**
+     * 停止音频文件播放
+     */
+    stopAudio() {
+        if (this.audioSource) {
+            try { this.audioSource.stop(); } catch (e) { /* 可能已停止 */ }
+            this.audioSource.disconnect();
+            this.audioSource = null;
+        }
+        this.audioBuffer = null;
+    }
+
+    // ========== 停止所有音乐 ==========
+
     stopMusic() {
         this.isPlaying = false;
         if (this.timerID) clearTimeout(this.timerID);
         if (this.midiScheduleTimer) clearTimeout(this.midiScheduleTimer);
+        this.stopAudio();
         if (this.masterGain) {
             try { this.masterGain.disconnect(); } catch (e) {}
             if (this.limiter) {

@@ -54,7 +54,9 @@ function gameLoop(timestamp) {
         gameState.intervalStartTime = now;
     }
     
-    const duration = loadedMidiData ? loadedMidiData.duration * 1000 : CONFIG.songDuration;
+    const duration = loadedMcData
+        ? loadedMcData.meta.duration * 1000
+        : (loadedMidiData ? loadedMidiData.duration * 1000 : CONFIG.songDuration);
     if (currentTime > duration + 2000 || gameState.health <= 0) {
         if (ui) ui.endGame();
         return;
@@ -69,7 +71,10 @@ function gameLoop(timestamp) {
     renderer.drawParticles();
     renderer.drawJudgments();
     renderer.drawHUD();
-    
+
+    // Hold 长条状态更新（每帧检查）
+    ui.updateHolds();
+
     requestAnimationFrame(gameLoop);
 }
 

@@ -60,11 +60,56 @@ class Renderer {
 
         for (let i = 0; i < gameState.notes.length; i++) {
             const note = gameState.notes[i];
-            if (note.hit) continue;
+            // 跳过已完成的 tap；hold 即使 head 已命中仍继续渲染（只要 holdActive 为 true）
+            if (note.hit && note.type !== 'hold') continue;
+            if (note.type === 'hold' && note.hit && !note.holdActive) continue;
 
             const timeDiff = note.time - currentTime;
             const y = judgmentY - (timeDiff / 1000) * speedMultiplier;
 
+            // Hold 长条特殊处理
+            if (note.type === 'hold' && note.endTime) {
+                const endTimeDiff = note.endTime - currentTime;
+                const yEnd = judgmentY - (endTimeDiff / 1000) * speedMultiplier;
+
+                // Hold 头部已过屏幕底部且未命中 → Miss
+                if (y > this.canvasHeight + 100 && !note.hit) {
+                    if (!note.missed) {
+                        note.missed = true;
+                        note.hit = true;
+                        gameState.activeHolds[note.track] = null;
+                        gameState.miss++;
+                        gameState.intervalStats.miss++;
+                        gameState.combo = 0;
+                        gameState.health = Math.max(0, gameState.health - 10);
+                        this.createMissEffect(judgmentY, note.track);
+                        audioEngine.playHitSound('miss');
+                    }
+                    continue;
+                }
+
+                // Hold 尾部已过屏幕底部 → 清理
+                if (yEnd > this.canvasHeight + 100) {
+                    continue;
+                }
+
+                // Hold 完全在上方 → 不渲染
+                if (yEnd < -50 && y < -50) continue;
+
+                note.y = y;
+                const x = this.trackStartX + note.track * (CONFIG.trackWidth + CONFIG.trackSpacing);
+
+                // 裁剪可见区域：top = 较上方的点, bottom = 较下方的点
+                const yTop = Math.min(y, yEnd);
+                const yBottom = Math.max(y, yEnd);
+                const visibleYTop = Math.max(yTop, -50);
+                const visibleYBottom = Math.min(yBottom, this.canvasHeight);
+
+                this.drawHoldBody(x, visibleYTop, visibleYBottom, TRACK_COLORS[note.track], note.holdActive);
+                continue;
+            }
+
+            // === Tap 音符 ===
             // Miss 判定
             if (y > this.canvasHeight + 100) {
                 if (!note.missed) {
@@ -82,8 +127,59 @@ class Renderer {
 
             note.y = y;
             const x = this.trackStartX + note.track * (CONFIG.trackWidth + CONFIG.trackSpacing);
-            // 关键：根据全局 noteStyle 变量绘制不同皮肤
             this.drawNoteByStyle(x, y, TRACK_COLORS[note.track], noteStyle);
+        }
+    }
+
+    /**
+     * 绘制 Hold 长条身体
+     * @param {number} x - 轨道起始 X
+     * @param {number} yTop - 上端 Y（较小值）
+     * @param {number} yBottom - 下端 Y（较大值）
+     * @param {string} color - 颜色
+     * @param {boolean} isActive - 是否正在被按住
+     */
+    drawHoldBody(x, yTop, yBottom, color, isActive) {
+        const ctx = this.ctx;
+        const trackW = CONFIG.trackWidth;
+        const bodyW = trackW - 8;
+        const bodyX = x + 4;
+        const headH = 24;
+        const tailH = 16;
+
+        const bodyTop = yTop + headH;
+        const bodyEnd = yBottom - tailH;
+        const bodyHeight = bodyEnd - bodyTop;
+        const alpha = isActive ? 0.9 : 0.7;
+
+        // 身体主体
+        if (bodyHeight > 0) {
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = color;
+            ctx.fillRect(bodyX, bodyTop, bodyW, bodyHeight);
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.fillRect(bodyX, bodyTop, 3, bodyHeight);
+            ctx.fillRect(bodyX + bodyW - 3, bodyTop, 3, bodyHeight);
+
+            ctx.globalAlpha = 1.0;
+        }
+
+        // 上端头部装饰
+        if (yTop > -50 && yTop < this.canvasHeight) {
+            this.drawNoteByStyle(x, yTop, color, noteStyle);
+        }
+
+        // 下端尾部装饰
+        if (yBottom > -50 && yBottom < this.canvasHeight) {
+            ctx.globalAlpha = alpha * 0.8;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(bodyX, yBottom - tailH, bodyW, tailH, 4);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fillRect(bodyX, yBottom - tailH, bodyW, 3);
+            ctx.globalAlpha = 1.0;
         }
     }
 
@@ -103,7 +199,7 @@ class Renderer {
             // 球皮：圆形 Note（正圆），直径略小于轨道宽度
             const cx = x + CONFIG.trackWidth / 2;               // 圆心 X（轨道中心）
             const cy = y + h / 2;                                // 圆心 Y
-            const radius = CONFIG.trackWidth * 0.4;             // 半径 = 轨道宽 × 0.4 ≈ 32
+            const radius = CONFIG.trackWidth * 0.475;            // 直径 = 轨道宽 × 0.95
 
             // 外发光
             ctx.shadowColor = color;

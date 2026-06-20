@@ -26,6 +26,10 @@ class GameState {
         this.intervalStartTime = 0;
         this.intervalStats = { perfect: 0, great: 0, miss: 0 };
         this.lastSpacePressTime = 0;
+        // Hold 长条跟踪：每个轨道当前按住的 hold note
+        this.activeHolds = [null, null, null, null];
+        // Hold 松开时间跟踪（用于 40ms 宽松判定）
+        this.holdReleaseTimes = [0, 0, 0, 0];
     }
     
     initForGame(notes) {
