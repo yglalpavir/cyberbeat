@@ -1,36 +1,68 @@
-// Main Entry Point
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+// ==================== 主入口 ====================
 
-// Initialize renderer
-const renderer = new Renderer(canvas, ctx);
+// 全局实例（供 ui.js 和其他模块访问）
+let renderer;
+let ui;
 
-// Initialize UI
-const ui = new UIManager();
+function init() {
+    // 获取 Canvas
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 初始化渲染器（全局）
+    renderer = new Renderer(canvas, ctx);
+    
+    // 初始化 UI（全局）
+    ui = new UIManager();
+    
+    // 监听窗口大小变化
+    window.addEventListener('resize', () => {
+        if (renderer) renderer.resize();
+    });
+    
+    // 启动开始画面渲染循环
+    requestAnimationFrame(renderStartScreen);
+}
 
-// Handle window resize
-window.addEventListener('resize', () => renderer.resize());
+// ==================== 开始画面渲染循环 ====================
 
-// Game Loop
+function renderStartScreen(timestamp) {
+    if (gameState.screen !== 'start') return;
+    
+    const ctx = renderer.ctx;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
+    renderer.drawBackground(timestamp || performance.now());
+    
+    requestAnimationFrame(renderStartScreen);
+}
+
+// ==================== 游戏主循环 ====================
+
+// 注意：此函数必须声明在全局作用域，因为 ui.js 通过 requestAnimationFrame(gameLoop) 调用
 function gameLoop(timestamp) {
-    if (gameState.screen !== 'game') return;
+    if (gameState.screen !== 'game') {
+        // 游戏结束，停止循环
+        return;
+    }
     
     const currentTime = performance.now() - gameState.startTime;
     
-    // Record interval stats
+    // 定期记录统计数据
     if (currentTime - (gameState.intervalStartTime - gameState.startTime) >= CONFIG.statsInterval) {
         gameState.recordIntervalStats();
         gameState.intervalStartTime = performance.now();
     }
     
-    // Check if game should end
-    const duration = gameMode === 'preset' ? CONFIG.songDuration : loadedMidiData.duration * 1000;
+    // 检查游戏是否结束
+    const duration = loadedMidiData ? loadedMidiData.duration * 1000 : CONFIG.songDuration;
     if (currentTime > duration + 2000 || gameState.health <= 0) {
-        ui.endGame();
+        if (ui) ui.endGame();
         return;
     }
     
-    // Render
+    // 渲染
+    const ctx = renderer.ctx;
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
     
@@ -45,16 +77,11 @@ function gameLoop(timestamp) {
     requestAnimationFrame(gameLoop);
 }
 
-// Start screen animation
-function renderStartScreen() {
-    if (gameState.screen !== 'start') return;
-    
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
-    renderer.drawBackground(performance.now());
-    
-    requestAnimationFrame(renderStartScreen);
-}
+// ==================== 启动 ====================
 
-// Initial render
-requestAnimationFrame(renderStartScreen);
+// DOM 加载完成后初始化
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}

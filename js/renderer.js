@@ -1,4 +1,5 @@
-// Canvas Renderer - All drawing functions
+// ==================== Canvas 渲染器 (现代简约风格) ====================
+
 class Renderer {
     constructor(canvas, ctx) {
         this.canvas = canvas;
@@ -14,101 +15,77 @@ class Renderer {
         this.canvasHeight = window.innerHeight;
         this.canvas.width = this.canvasWidth;
         this.canvas.height = this.canvasHeight;
-        
         const totalTrackWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * 8;
         this.trackStartX = (this.canvasWidth - totalTrackWidth) / 2;
+        this.ctx.imageSmoothingEnabled = true;
     }
     
     drawBackground(time) {
         const ctx = this.ctx;
-        ctx.save();
-        ctx.scale(UI_SCALE, UI_SCALE);
-        
-        const w = this.canvasWidth / UI_SCALE;
-        const h = this.canvasHeight / UI_SCALE;
-        
-        const grad = ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, '#1e1e2e');
-        grad.addColorStop(1, '#2d2d44');
+        const grad = ctx.createLinearGradient(0, 0, 0, this.canvasHeight);
+        grad.addColorStop(0, '#0f0f18');
+        grad.addColorStop(1, '#1a1a28');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, w, h);
-        
-        // Stars/particles
-        ctx.fillStyle = '#ffffff';
-        for (let i = 0; i < 30; i++) {
-            const sx = (i * 137) % w;
-            const sy = ((i * 251) % h) + (time * 0.01) % 20;
-            const size = (i % 3 === 0) ? 2 : 1;
-            ctx.fillRect(sx, sy, size, size);
-        }
-        
-        ctx.restore();
+        ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
     
     drawTracks() {
         const ctx = this.ctx;
         const judgmentY = this.canvasHeight * CONFIG.judgmentLineY;
         
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.lineWidth = 2;
-        
         for (let i = 0; i < CONFIG.trackCount; i++) {
             const x = this.trackStartX + i * (CONFIG.trackWidth + 8);
             
-            // Track line
+            // 轨道虚线
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 12]);
             ctx.beginPath();
-            ctx.setLineDash([5, 10]);
             ctx.moveTo(x, 0);
             ctx.lineTo(x, this.canvasHeight);
             ctx.stroke();
             ctx.setLineDash([]);
             
-            // Key indicator
             const keyY = this.canvasHeight - 60;
             const isPressed = gameState.pressedKeys.has(KEYS[i]);
             
-            if (isPressed) {
-                ctx.fillStyle = TRACK_COLORS[i];
-                ctx.globalAlpha = 0.5;
-                ctx.fillRect(x, keyY, CONFIG.trackWidth, 40);
-                ctx.globalAlpha = 1.0;
-            }
+            // 按键背景
+            ctx.fillStyle = isPressed ? TRACK_COLORS[i] : 'rgba(255, 255, 255, 0.05)';
+            ctx.beginPath();
+            ctx.roundRect(x, keyY, CONFIG.trackWidth, 40, 8);
+            ctx.fill();
             
-            ctx.strokeStyle = TRACK_COLORS[i];
-            ctx.strokeRect(x, keyY, CONFIG.trackWidth, 40);
+            // 按键边框
+            ctx.strokeStyle = isPressed ? TRACK_COLORS[i] : 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(x, keyY, CONFIG.trackWidth, 40, 8);
+            ctx.stroke();
             
-            // Key label
-            ctx.save();
-            ctx.translate(x + CONFIG.trackWidth / 2, keyY + 28);
-            ctx.scale(UI_SCALE, UI_SCALE);
-            ctx.fillStyle = isPressed ? '#000' : TRACK_COLORS[i];
-            ctx.font = '20px "Press Start 2P"';
+            // 按键文字
+            ctx.fillStyle = isPressed ? '#000' : 'rgba(255, 255, 255, 0.7)';
+            ctx.font = 'bold 16px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(TRACK_KEYS[i], 0, 0);
-            ctx.restore();
+            ctx.textBaseline = 'middle';
+            ctx.fillText(TRACK_KEYS[i], x + CONFIG.trackWidth / 2, keyY + 20);
         }
         
-        // Judgment line
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(
-            this.trackStartX - 10,
-            judgmentY - 2,
-            (CONFIG.trackWidth * 4) + (8 * 3) + 20,
-            4
-        );
+        // 判定线
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.fillRect(this.trackStartX - 10, judgmentY - 1, (CONFIG.trackWidth * 4) + (8 * 3) + 20, 2);
     }
     
     drawNotes(currentTime) {
         const judgmentY = this.canvasHeight * CONFIG.judgmentLineY;
         const speedMultiplier = noteSpeed * 100;
         
-        for (const note of gameState.notes) {
+        for (let i = 0; i < gameState.notes.length; i++) {
+            const note = gameState.notes[i];
             if (note.hit) continue;
             
             const timeDiff = note.time - currentTime;
             const y = judgmentY - (timeDiff / 1000) * speedMultiplier;
             
-            // Missed notes that went past screen
             if (y > this.canvasHeight + 100) {
                 if (!note.missed) {
                     note.missed = true;
@@ -121,44 +98,41 @@ class Renderer {
                 }
                 continue;
             }
-            
             if (y < -50) continue;
             
             note.y = y;
             const x = this.trackStartX + note.track * (CONFIG.trackWidth + 8);
-            
-            if (noteStyle === 'orb') {
-                this.drawOrbNote(x, y, TRACK_COLORS[note.track]);
-            } else {
-                this.drawPixelNote(x, y, TRACK_COLORS[note.track]);
-            }
+            // 使用全局 noteStyle 变量决定绘制方式
+            this.drawModernNote(x, y, TRACK_COLORS[note.track], noteStyle);
         }
     }
     
-    drawPixelNote(x, y, color) {
+    drawModernNote(x, y, color, style) {
         const ctx = this.ctx;
-        ctx.imageSmoothingEnabled = false;
-        ctx.fillStyle = color;
-        ctx.fillRect(x + 2, y, CONFIG.trackWidth - 4, 24);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.fillRect(x + 2, y, CONFIG.trackWidth - 4, 4);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-        ctx.fillRect(x + 2, y + 20, CONFIG.trackWidth - 4, 4);
-    }
-    
-    drawOrbNote(x, y, color) {
-        const ctx = this.ctx;
-        ctx.imageSmoothingEnabled = true;
-        const centerX = x + CONFIG.trackWidth / 2;
-        const centerY = y + 12;
-        const radiusX = 31.2;
-        const radiusY = 28.6;
+        const w = CONFIG.trackWidth - 4;
+        const h = 24;
         
-        ctx.beginPath();
-        ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.imageSmoothingEnabled = false;
+        if (style === 'orb') {
+            // 胶囊形（全圆角）
+            const centerY = y + h / 2;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(x + 2, y, w, h, 12);  // 圆角半径约一半高，形成胶囊
+            ctx.fill();
+            // 高光
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.beginPath();
+            ctx.roundRect(x + 6, y + 4, w - 12, h / 3, 6);
+            ctx.fill();
+        } else {
+            // 砖块风格：圆角矩形，顶部高光
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(x + 2, y, w, h, 6);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.fillRect(x + 2, y, w, 3);
+        }
     }
     
     drawLasers() {
@@ -166,16 +140,11 @@ class Renderer {
             const laser = gameState.lasers[i];
             laser.height += 15;
             laser.alpha -= 0.05;
-            
-            if (laser.alpha <= 0) {
-                gameState.lasers.splice(i, 1);
-                continue;
-            }
-            
-            this.ctx.globalAlpha = laser.alpha;
+            if (laser.alpha <= 0) { gameState.lasers.splice(i, 1); continue; }
+            this.ctx.globalAlpha = laser.alpha * 0.4;
             this.ctx.fillStyle = laser.color;
             const startY = this.canvasHeight * CONFIG.judgmentLineY;
-            this.ctx.fillRect(laser.x - laser.width / 2, startY - laser.height, laser.width, laser.height);
+            this.ctx.fillRect(laser.x - 2, startY - laser.height, 4, laser.height);
         }
         this.ctx.globalAlpha = 1.0;
     }
@@ -186,226 +155,147 @@ class Renderer {
             p.x += p.vx;
             p.y += p.vy;
             p.life -= 0.05;
-            
-            if (p.life <= 0) {
-                gameState.particles.splice(i, 1);
-                continue;
-            }
-            
-            this.ctx.globalAlpha = p.life;
+            if (p.life <= 0) { gameState.particles.splice(i, 1); continue; }
+            this.ctx.globalAlpha = p.life * 0.6;
             this.ctx.fillStyle = p.color;
-            this.ctx.fillRect(p.x, p.y, p.size, p.size);
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+            this.ctx.fill();
         }
         this.ctx.globalAlpha = 1.0;
     }
     
     drawJudgments() {
         const ctx = this.ctx;
-        ctx.save();
-        ctx.scale(UI_SCALE, UI_SCALE);
-        
         for (let i = gameState.judgments.length - 1; i >= 0; i--) {
             const j = gameState.judgments[i];
-            const simpleY = j.y / UI_SCALE;
-            
             j.y -= 1.5;
             j.alpha -= 0.02;
             if (j.bounce > 1.0) j.bounce -= 0.05;
+            if (j.alpha <= 0) { gameState.judgments.splice(i, 1); continue; }
             
-            if (j.alpha <= 0) {
-                gameState.judgments.splice(i, 1);
-                continue;
-            }
-            
-            const x = (this.trackStartX + j.track * (CONFIG.trackWidth + 8) + CONFIG.trackWidth / 2) / UI_SCALE;
-            
+            const x = this.trackStartX + j.track * (CONFIG.trackWidth + 8) + CONFIG.trackWidth / 2;
             ctx.globalAlpha = j.alpha;
-            ctx.font = `bold ${Math.round(12 * j.bounce)}px "Press Start 2P"`;
+            ctx.font = `bold ${Math.round(14 * j.bounce)}px sans-serif`;
             ctx.textAlign = 'center';
-            ctx.fillStyle = '#000000';
-            ctx.fillText(j.text, x + 2, simpleY + 2);
+            ctx.textBaseline = 'middle';
             
-            if (j.text === 'PERFECT') ctx.fillStyle = '#ffef5e';
-            else if (j.text === 'GREAT') ctx.fillStyle = '#89d868';
-            else ctx.fillStyle = '#ff77a9';
+            if (j.text === 'PERFECT') ctx.fillStyle = '#ffd43b';
+            else if (j.text === 'GREAT') ctx.fillStyle = '#69db7c';
+            else ctx.fillStyle = '#ff6b6b';
             
-            ctx.fillText(j.text, x, simpleY);
-            ctx.globalAlpha = 1.0;
+            ctx.fillText(j.text, x, j.y);
         }
-        
-        ctx.restore();
+        ctx.globalAlpha = 1.0;
     }
     
     drawHUD() {
         const ctx = this.ctx;
         ctx.save();
-        ctx.scale(UI_SCALE, UI_SCALE);
         
-        const w = this.canvasWidth / UI_SCALE;
-        const h = this.canvasHeight / UI_SCALE;
-        
-        // Score
-        ctx.fillStyle = '#fcfcfc';
-        ctx.font = '12px "Press Start 2P"';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('SCORE', 20, 30);
-        ctx.font = '20px "Press Start 2P"';
-        ctx.fillStyle = '#69b7eb';
-        ctx.fillText(gameState.score.toLocaleString(), 20, 55);
+        ctx.textBaseline = 'top';
+        ctx.fillText('SCORE', 30, 30);
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillStyle = '#4dabf7';
+        ctx.fillText(gameState.score.toLocaleString(), 30, 55);
         
-        // Health bar
-        const hX = w - 160;
-        ctx.fillStyle = '#000';
-        ctx.fillRect(hX, 20, 140, 20);
-        
-        const healthColor = gameState.health > 60 ? '#89d868' : 
-                           gameState.health > 30 ? '#ffef5e' : '#ff77a9';
+        const hX = this.canvasWidth - 180;
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.roundRect(hX, 25, 140, 14, 7);
+        ctx.fill();
+        const healthColor = gameState.health > 60 ? '#69db7c' : gameState.health > 30 ? '#ffd43b' : '#ff6b6b';
         ctx.fillStyle = healthColor;
-        ctx.fillRect(hX + 2, 22, (134 * gameState.health / 100), 16);
-        ctx.strokeStyle = '#fcfcfc';
-        ctx.strokeRect(hX, 20, 140, 20);
+        ctx.beginPath();
+        ctx.roundRect(hX, 25, Math.max(0, 140 * gameState.health / 100), 14, 7);
+        ctx.fill();
         
-        // Combo
         if (gameState.combo > 0) {
-            ctx.font = 'bold 32px "Press Start 2P"';
+            ctx.font = 'bold 36px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillStyle = '#ff77a9';
-            const scale = 1 + Math.sin(performance.now() * 0.01) * 0.05;
-            ctx.save();
-            ctx.translate(w / 2, h / 2);
-            ctx.scale(scale, scale);
-            ctx.fillText(gameState.combo, 0, 0);
-            ctx.restore();
-            ctx.font = '10px "Press Start 2P"';
-            ctx.fillStyle = '#fcfcfc';
-            ctx.fillText('COMBO', w / 2, h / 2 + 25);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(gameState.combo, this.canvasWidth / 2, this.canvasHeight / 2 - 10);
+            ctx.font = '12px sans-serif';
+            ctx.fillStyle = '#aaaaaa';
+            ctx.fillText('COMBO', this.canvasWidth / 2, this.canvasHeight / 2 + 22);
         }
         
-        // Stats
-        ctx.font = '10px "Press Start 2P"';
+        ctx.font = '13px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillStyle = '#ffef5e';
-        ctx.fillText('P:' + gameState.perfect, 20, 90);
-        ctx.fillStyle = '#89d868';
-        ctx.fillText('G:' + gameState.great, 100, 90);
-        ctx.fillStyle = '#ff77a9';
-        ctx.fillText('M:' + gameState.miss, 180, 90);
+        ctx.fillStyle = '#ffd43b';
+        ctx.fillText('P:' + gameState.perfect, 30, 100);
+        ctx.fillStyle = '#69db7c';
+        ctx.fillText('G:' + gameState.great, 130, 100);
+        ctx.fillStyle = '#ff6b6b';
+        ctx.fillText('M:' + gameState.miss, 230, 100);
         
         const acc = gameState.calculateTotalAcc();
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('ACC:' + acc.toFixed(2) + '%', 20, 110);
+        ctx.fillText('ACC:' + acc.toFixed(2) + '%', 30, 125);
         
         ctx.restore();
     }
     
     drawLineChart(historyData) {
         const chartCanvas = document.getElementById('lineChartCanvas');
+        if (!chartCanvas) return;
         const cCtx = chartCanvas.getContext('2d');
         const container = chartCanvas.parentElement;
+        if (!container) return;
         const w = container.clientWidth;
         const h = container.clientHeight;
-        
         chartCanvas.width = w;
         chartCanvas.height = h;
-        cCtx.imageSmoothingEnabled = false;
         cCtx.clearRect(0, 0, w, h);
-        cCtx.fillStyle = '#2d2d44';
-        cCtx.fillRect(0, 0, w, h);
         
         if (historyData.length === 0) return;
-        
-        const leftMargin = 40;
-        const topMargin = 20;
-        const rightMargin = 10;
-        const bottomMargin = 20;
+        const leftMargin = 40, topMargin = 20, bottomMargin = 20, rightMargin = 10;
         const chartW = w - leftMargin - rightMargin;
         const chartH = h - topMargin - bottomMargin;
         
-        // Y-axis labels
-        cCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        cCtx.font = '10px "Press Start 2P"';
+        cCtx.fillStyle = 'rgba(255,255,255,0.05)';
+        cCtx.fillRect(0, 0, w, h);
+        
+        cCtx.fillStyle = 'rgba(255,255,255,0.5)';
+        cCtx.font = '10px sans-serif';
         cCtx.textAlign = 'right';
-        cCtx.fillText('100%', leftMargin - 4, topMargin + 4);
-        cCtx.fillText('50%', leftMargin - 4, topMargin + chartH / 2 + 3);
+        cCtx.fillText('100%', leftMargin - 4, topMargin);
+        cCtx.fillText('50%', leftMargin - 4, topMargin + chartH/2);
         cCtx.fillText('0%', leftMargin - 4, topMargin + chartH);
         
-        // Grid lines
-        cCtx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        cCtx.lineWidth = 1;
-        for (let i = 0; i <= 2; i++) {
-            const y = topMargin + (chartH / 2) * i;
-            cCtx.beginPath();
-            cCtx.moveTo(leftMargin, y);
-            cCtx.lineTo(w - rightMargin, y);
-            cCtx.stroke();
-        }
-        
         const pointSpacing = historyData.length > 1 ? chartW / (historyData.length - 1) : 0;
-        
-        // Interval accuracy bars
-        historyData.forEach((data, index) => {
-            const x = leftMargin + index * pointSpacing;
-            const barW = pointSpacing > 0 ? Math.max(2, pointSpacing - 2) : 2;
-            const barH = chartH * (data.intervalAcc / 100);
-            cCtx.fillStyle = 'rgba(255, 239, 94, 0.2)';
-            cCtx.fillRect(x - barW / 2, topMargin + chartH - barH, barW, barH);
-        });
-        
-        // Total accuracy line
-        cCtx.strokeStyle = '#ff77a9';
+        cCtx.strokeStyle = '#4dabf7';
         cCtx.lineWidth = 2;
         cCtx.beginPath();
         historyData.forEach((data, index) => {
             const x = leftMargin + index * pointSpacing;
-            const y = topMargin + chartH - (chartH * (data.totalAcc / 100));
+            const y = topMargin + chartH - (chartH * data.totalAcc / 100);
             if (index === 0) cCtx.moveTo(x, y);
             else cCtx.lineTo(x, y);
         });
         cCtx.stroke();
-        
-        // Data points
-        historyData.forEach((data, index) => {
-            const x = leftMargin + index * pointSpacing;
-            const y = topMargin + chartH - (chartH * (data.totalAcc / 100));
-            cCtx.fillStyle = '#ff77a9';
-            cCtx.fillRect(x - 2, y - 2, 4, 4);
-        });
     }
     
     createMissEffect(y, track) {
-        gameState.judgments.push({
-            text: 'MISS',
-            y: y - 50,
-            track,
-            alpha: 1,
-            scale: 1.0,
-            bounce: 1.0
-        });
+        gameState.judgments.push({ text: 'MISS', y: y - 40, track, alpha: 1, scale: 1.0, bounce: 1.0 });
     }
     
     addJudgment(text, y, track) {
-        gameState.judgments.push({
-            text,
-            y: y - 50,
-            track,
-            alpha: 1,
-            scale: 1.0,
-            bounce: 1.2
-        });
+        gameState.judgments.push({ text, y: y - 40, track, alpha: 1, scale: 1.0, bounce: 1.2 });
     }
     
     createHitParticles(y, track, color) {
         const x = this.trackStartX + track * (CONFIG.trackWidth + 8) + CONFIG.trackWidth / 2;
-        
-        for (let i = 0; i < 8; i++) {
-            const angle = (Math.PI * 2 * i) / 8;
-            const speed = 5 + Math.random() * 3;
+        for (let i = 0; i < 6; i++) {
+            const angle = (Math.PI * 2 * i) / 6;
             gameState.particles.push({
-                x,
-                y,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
-                size: 6,
+                x, y,
+                vx: Math.cos(angle) * 4,
+                vy: Math.sin(angle) * 4,
+                size: 8,
                 color,
                 life: 1.0
             });
@@ -414,12 +304,25 @@ class Renderer {
     
     createLaser(track) {
         const x = this.trackStartX + track * (CONFIG.trackWidth + 8) + CONFIG.trackWidth / 2;
-        gameState.lasers.push({
-            x,
-            width: CONFIG.trackWidth,
-            height: 0,
-            color: TRACK_COLORS[track],
-            alpha: 0.5
-        });
+        gameState.lasers.push({ x, width: 4, height: 0, color: TRACK_COLORS[track], alpha: 0.8 });
     }
+}
+
+// 工具：Canvas roundRect polyfill
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+        if (typeof r === 'number') r = { tl: r, tr: r, br: r, bl: r };
+        this.beginPath();
+        this.moveTo(x + r.tl, y);
+        this.lineTo(x + w - r.tr, y);
+        this.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+        this.lineTo(x + w, y + h - r.br);
+        this.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+        this.lineTo(x + r.bl, y + h);
+        this.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+        this.lineTo(x, y + r.tl);
+        this.quadraticCurveTo(x, y, x + r.tl, y);
+        this.closePath();
+        return this;
+    };
 }

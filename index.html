@@ -4,18 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>CyberBeat Pixel</title>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
 
-    <!-- ==================== 开始画面 - 曲库选择 ==================== -->
+    <!-- ==================== 开始画面 ==================== -->
     <div id="startScreen" class="screen">
-        <div class="bg-grid"></div>
-        
         <div class="start-layout">
-            <!-- 左侧：LOGO + 状态 -->
+            <!-- 左侧 -->
             <div class="start-sidebar">
                 <div class="logo-block">
                     <h1 class="logo">CYBER<br>BEAT</h1>
@@ -29,16 +26,16 @@
                 </div>
                 
                 <div class="start-actions">
-                    <button class="pixel-btn dark" id="settingsBtn" disabled>
-                        <span class="btn-icon">⚙</span> CONFIG
+                    <button class="btn btn-secondary" id="settingsBtn" disabled>
+                        <span class="btn-icon">⚙</span> SETTING
                     </button>
-                    <button class="pixel-btn green" id="startBtn" disabled>
+                    <button class="btn btn-primary" id="startBtn" disabled>
                         <span class="btn-icon">▶</span> START
                     </button>
                 </div>
             </div>
             
-            <!-- 右侧：曲库列表 -->
+            <!-- 右侧曲库 -->
             <div class="start-main">
                 <div class="song-panel">
                     <div class="song-panel-header">
@@ -49,33 +46,26 @@
                     <div class="song-list-wrapper" id="songListWrapper">
                         <!-- 导入 MIDI -->
                         <div class="song-card import-card" id="importMidiCard">
-                            <div class="card-accent"></div>
                             <div class="card-body">
-                                <div class="card-icon import-card-icon">📂</div>
+                                <div class="card-icon">📂</div>
                                 <div class="card-info">
                                     <span class="card-title import-title">IMPORT MIDI</span>
-                                    <span class="card-sub import-sub">Load from device</span>
+                                    <span class="card-sub">Load from device</span>
                                 </div>
-                                <div class="card-arrow">▶</div>
+                                <div class="card-arrow">→</div>
                             </div>
                             <input type="file" id="midiUpload" accept=".mid" class="card-file-input">
                         </div>
                         
-                        <!-- 分割线 -->
                         <div class="song-divider">
-                            <span class="divider-text">LIBRARY</span>
+                            <span>LIBRARY</span>
                         </div>
                         
-                        <!-- 曲库歌曲 -->
-                        <div class="song-cards" id="songCards">
-                            <!-- JS 动态渲染 -->
-                        </div>
-                        
-                        <!-- 空状态 -->
+                        <div class="song-cards" id="songCards"></div>
                         <div class="song-empty" id="songEmpty" style="display:none;">
                             <span class="empty-icon">🎵</span>
-                            <span class="empty-text">NO SONGS IN LIBRARY</span>
-                            <span class="empty-hint">Use IMPORT MIDI above</span>
+                            <span>No songs in library</span>
+                            <span class="empty-hint">Use import above</span>
                         </div>
                     </div>
                 </div>
@@ -88,7 +78,7 @@
         <div class="settings-overlay">
             <div class="settings-card">
                 <div class="settings-header">
-                    <h2 class="settings-title">CONFIGURATION</h2>
+                    <h2>SETTINGS</h2>
                 </div>
                 
                 <div class="settings-song-info" id="settingsSongInfo">
@@ -97,41 +87,49 @@
                 </div>
 
                 <div class="settings-group">
-                    <span class="settings-label">DIFFICULTY</span>
-                    <div class="diff-selector-row">
-                        <button class="diff-btn easy" data-diff="easy">EASY</button>
-                        <button class="diff-btn easy-plus" data-diff="easy+">EASY+</button>
-                        <button class="diff-btn normal" data-diff="normal">NORMAL</button>
-                        <button class="diff-btn normal-plus active" data-diff="normal+">NORMAL+</button>
+                    <label class="settings-label">DIFFICULTY</label>
+                    <div class="diff-selector">
+                        <button class="diff-btn" data-diff="easy">EASY</button>
+                        <button class="diff-btn" data-diff="easy+">EASY+</button>
+                        <button class="diff-btn" data-diff="normal">NORMAL</button>
+                        <button class="diff-btn active" data-diff="normal+">NORMAL+</button>
                     </div>
                 </div>
 
                 <div class="settings-group">
-                    <span class="settings-label">NOTE STYLE</span>
-                    <div class="style-selector-row">
+                    <label class="settings-label">NOTE STYLE</label>
+                    <div class="style-selector">
                         <button class="style-btn" data-style="pixel">
                             <span class="style-preview style-pixel"></span>
-                            <span>PIXEL</span>
+                            PIXEL
                         </button>
                         <button class="style-btn active" data-style="orb">
                             <span class="style-preview style-orb"></span>
-                            <span>ORB</span>
+                            ORB
                         </button>
                     </div>
                 </div>
 
                 <div class="settings-group">
-                    <span class="settings-label">SPEED</span>
-                    <div class="speed-row">
+                    <label class="settings-label">SPEED</label>
+                    <div class="speed-control">
                         <button class="speed-btn" id="speedDown">−</button>
                         <span class="speed-value" id="speedValue">16.0</span>
                         <button class="speed-btn" id="speedUp">+</button>
                     </div>
                 </div>
 
+                <div class="settings-group">
+                    <label class="settings-label">VOLUME</label>
+                    <div class="volume-control">
+                        <input type="range" id="volumeSlider" min="0" max="100" value="25" class="volume-slider">
+                        <span class="volume-value" id="volumeValue">25%</span>
+                    </div>
+                </div>
+
                 <div class="settings-actions">
-                    <button class="pixel-btn dark" id="settingsBackBtn">BACK</button>
-                    <button class="pixel-btn green" id="settingsStartBtn">START GAME</button>
+                    <button class="btn btn-secondary" id="settingsBackBtn">BACK</button>
+                    <button class="btn btn-primary" id="settingsStartBtn">START GAME</button>
                 </div>
             </div>
         </div>
@@ -144,30 +142,12 @@
                 <div class="rank" id="rankDisplay">S</div>
                 
                 <div class="stats-grid">
-                    <div class="stat-box">
-                        <span class="stat-label">SCORE</span>
-                        <span class="stat-value" id="finalScore">0</span>
-                    </div>
-                    <div class="stat-box">
-                        <span class="stat-label">MAX COMBO</span>
-                        <span class="stat-value" id="finalCombo">0</span>
-                    </div>
-                    <div class="stat-box">
-                        <span class="stat-label">ACC</span>
-                        <span class="stat-value" id="finalAccuracy">0%</span>
-                    </div>
-                    <div class="stat-box p">
-                        <span class="stat-label">PERFECT</span>
-                        <span class="stat-value" id="finalPerfect">0</span>
-                    </div>
-                    <div class="stat-box g">
-                        <span class="stat-label">GREAT</span>
-                        <span class="stat-value" id="finalGreat">0</span>
-                    </div>
-                    <div class="stat-box m">
-                        <span class="stat-label">MISS</span>
-                        <span class="stat-value" id="finalMiss">0</span>
-                    </div>
+                    <div class="stat-box"><span class="stat-label">SCORE</span><span class="stat-value" id="finalScore">0</span></div>
+                    <div class="stat-box"><span class="stat-label">MAX COMBO</span><span class="stat-value" id="finalCombo">0</span></div>
+                    <div class="stat-box"><span class="stat-label">ACC</span><span class="stat-value" id="finalAccuracy">0%</span></div>
+                    <div class="stat-box p"><span class="stat-label">PERFECT</span><span class="stat-value" id="finalPerfect">0</span></div>
+                    <div class="stat-box g"><span class="stat-label">GREAT</span><span class="stat-value" id="finalGreat">0</span></div>
+                    <div class="stat-box m"><span class="stat-label">MISS</span><span class="stat-value" id="finalMiss">0</span></div>
                 </div>
                 
                 <div class="chart-box">
@@ -176,8 +156,8 @@
                 </div>
                 
                 <div class="result-actions">
-                    <button class="pixel-btn purple" id="exportBtn">EXPORT RESULT</button>
-                    <button class="pixel-btn green" id="homeBtn">HOME</button>
+                    <button class="btn btn-purple" id="exportBtn">EXPORT RESULT</button>
+                    <button class="btn btn-primary" id="homeBtn">HOME</button>
                 </div>
             </div>
         </div>
