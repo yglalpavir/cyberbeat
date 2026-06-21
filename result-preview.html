@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberBeat 结算界面预览</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            padding: 20px;
+            display: flex;
+            gap: 40px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .preview-container {
+            flex: 1;
+            min-width: 300px;
+        }
+        .preview-title {
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 成功状态预览 -->
+    <div class="preview-container">
+        <div class="preview-title">成功状态 (COMPLETED)</div>
+        <div class="screen" style="position: relative; height: 600px;">
+            <div class="result-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+                <div class="result-card">
+                    <!-- 状态指示 -->
+                    <div class="result-status">
+                        <div class="status-icon">✓</div>
+                        <div class="status-text">COMPLETED</div>
+                    </div>
+                    
+                    <!-- 排名等级 -->
+                    <div class="rank-display">
+                        <div class="rank">S</div>
+                        <div class="rank-label">PERFECT</div>
+                    </div>
+                    
+                    <!-- 主要成绩 -->
+                    <div class="primary-stats">
+                        <div class="stat-big">
+                            <span class="stat-label">SCORE</span>
+                            <span class="stat-value">285,500</span>
+                        </div>
+                        <div class="stat-big">
+                            <span class="stat-label">ACCURACY</span>
+                            <span class="stat-value">97.95%</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 详细统计 -->
+                    <div class="stats-grid">
+                        <div class="stat-box combo">
+                            <span class="stat-label">MAX COMBO</span>
+                            <span class="stat-value">245</span>
+                        </div>
+                        <div class="stat-box perfect">
+                            <span class="stat-label">PERFECT</span>
+                            <span class="stat-value">243</span>
+                        </div>
+                        <div class="stat-box great">
+                            <span class="stat-label">GREAT</span>
+                            <span class="stat-value">51</span>
+                        </div>
+                        <div class="stat-box miss">
+                            <span class="stat-label">MISS</span>
+                            <span class="stat-value">5</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 性能曲线图 -->
+                    <div class="chart-box">
+                        <span class="chart-title">PERFORMANCE</span>
+                        <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 0.8rem;">
+                            [Performance Chart Placeholder]
+                        </div>
+                    </div>
+                    
+                    <!-- 按钮操作 -->
+                    <div class="result-actions">
+                        <button class="btn btn-secondary">📊 EXPORT RESULT</button>
+                        <button class="btn btn-primary">🏠 HOME</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 失败状态预览 -->
+    <div class="preview-container">
+        <div class="preview-title">失败状态 (FAILED)</div>
+        <div class="screen" style="position: relative; height: 600px;">
+            <div class="result-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
+                <div class="result-card result-failed">
+                    <!-- 状态指示 -->
+                    <div class="result-status failed">
+                        <div class="status-icon">❌</div>
+                        <div class="status-text">FAILED</div>
+                    </div>
+                    
+                    <!-- 排名等级 -->
+                    <div class="rank-display">
+                        <div class="rank">C</div>
+                        <div class="rank-label">FAILED</div>
+                    </div>
+                    
+                    <!-- 主要成绩 -->
+                    <div class="primary-stats">
+                        <div class="stat-big">
+                            <span class="stat-label">SCORE</span>
+                            <span class="stat-value">82,350</span>
+                        </div>
+                        <div class="stat-big">
+                            <span class="stat-label">ACCURACY</span>
+                            <span class="stat-value">56.42%</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 详细统计 -->
+                    <div class="stats-grid">
+                        <div class="stat-box combo">
+                            <span class="stat-label">MAX COMBO</span>
+                            <span class="stat-value">87</span>
+                        </div>
+                        <div class="stat-box perfect">
+                            <span class="stat-label">PERFECT</span>
+                            <span class="stat-value">62</span>
+                        </div>
+                        <div class="stat-box great">
+                            <span class="stat-label">GREAT</span>
+                            <span class="stat-value">28</span>
+                        </div>
+                        <div class="stat-box miss">
+                            <span class="stat-label">MISS</span>
+                            <span class="stat-value">34</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 性能曲线图 -->
+                    <div class="chart-box">
+                        <span class="chart-title">PERFORMANCE</span>
+                        <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 0.8rem;">
+                            [Performance Chart Placeholder]
+                        </div>
+                    </div>
+                    
+                    <!-- 按钮操作 -->
+                    <div class="result-actions">
+                        <button class="btn btn-secondary">📊 EXPORT RESULT</button>
+                        <button class="btn btn-primary">🏠 HOME</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+</body>
+</html>

@@ -147,17 +147,20 @@ class Renderer {
         const headH = 24;
         const tailH = 16;
 
-        const bodyTop = yTop + headH;
-        const bodyEnd = yBottom - tailH;
+        // yTop = 尾部（上端），yBottom = 头部（下端，靠近判定线）
+        // 身体在尾部装饰和头部 note 之间
+        const bodyTop = yTop + tailH;
+        const bodyEnd = yBottom;
         const bodyHeight = bodyEnd - bodyTop;
-        const alpha = isActive ? 0.9 : 0.7;
+        const alpha = isActive ? 0.6 : 0.35;
 
-        // 身体主体
+        // 半透明长条身体
         if (bodyHeight > 0) {
             ctx.globalAlpha = alpha;
             ctx.fillStyle = color;
             ctx.fillRect(bodyX, bodyTop, bodyW, bodyHeight);
 
+            // 两侧边缘高光
             ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
             ctx.fillRect(bodyX, bodyTop, 3, bodyHeight);
             ctx.fillRect(bodyX + bodyW - 3, bodyTop, 3, bodyHeight);
@@ -165,20 +168,20 @@ class Renderer {
             ctx.globalAlpha = 1.0;
         }
 
-        // 上端头部装饰
-        if (yTop > -50 && yTop < this.canvasHeight) {
-            this.drawNoteByStyle(x, yTop, color, noteStyle);
+        // 头部判定 — 渲染为对应的 note 皮肤（位于 yBottom，靠近判定线）
+        if (yBottom > -50 && yBottom < this.canvasHeight) {
+            this.drawNoteByStyle(x, yBottom, color, noteStyle);
         }
 
-        // 下端尾部装饰
-        if (yBottom > -50 && yBottom < this.canvasHeight) {
+        // 尾部装饰（位于 yTop，远离判定线）
+        if (yTop > -50 && yTop < this.canvasHeight) {
             ctx.globalAlpha = alpha * 0.8;
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.roundRect(bodyX, yBottom - tailH, bodyW, tailH, 4);
+            ctx.roundRect(bodyX, yTop, bodyW, tailH, 4);
             ctx.fill();
             ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.fillRect(bodyX, yBottom - tailH, bodyW, 3);
+            ctx.fillRect(bodyX, yTop + tailH - 3, bodyW, 3);
             ctx.globalAlpha = 1.0;
         }
     }
@@ -196,29 +199,15 @@ class Renderer {
         const h = 24;
 
         if (style === 'orb') {
-            // 球皮：圆形 Note（正圆），直径略小于轨道宽度
+            // 纯色圆皮：扁平实心圆 Note，直径略小于轨道宽度
             const cx = x + CONFIG.trackWidth / 2;               // 圆心 X（轨道中心）
             const cy = y + h / 2;                                // 圆心 Y
             const radius = CONFIG.trackWidth * 0.475;            // 直径 = 轨道宽 × 0.95
 
-            // 外发光
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 12;
-
-            // 主体圆形
+            // 主体纯色圆形（无阴影、无渐变，纯平面风格）
             ctx.fillStyle = color;
             ctx.beginPath();
             ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-            ctx.fill();
-
-            // 关闭外发光
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
-
-            // 内高光（左上小圆）
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-            ctx.beginPath();
-            ctx.arc(cx - radius * 0.2, cy - radius * 0.35, radius * 0.3, 0, Math.PI * 2);
             ctx.fill();
         } else {
             // 砖皮：圆角矩形带顶部高光
@@ -389,24 +378,103 @@ class Renderer {
         cCtx.fillStyle = 'rgba(255,255,255,0.05)';
         cCtx.fillRect(0, 0, w, h);
 
+        // 计算数据的最小值和最大值
+        let minAcc = 100, maxAcc = 0;
+        historyData.forEach(data => {
+            minAcc = Math.min(minAcc, data.totalAcc);
+            maxAcc = Math.max(maxAcc, data.totalAcc);
+        });
+
+        // 确保最小值不会是0（避免完全空的图表）
+        if (minAcc === maxAcc) {
+            minAcc = Math.max(0, minAcc - 10);
+            maxAcc = Math.min(100, maxAcc + 10);
+        }
+
+        // 添加一些padding（上下各10%）
+        const range = maxAcc - minAcc;
+        const padding = range * 0.1;
+        const yMin = Math.max(0, minAcc - padding);
+        const yMax = Math.min(100, maxAcc + padding);
+        const yRange = yMax - yMin;
+
+        // 绘制Y轴标签（自适应生成3-4个标记）
         cCtx.fillStyle = 'rgba(255,255,255,0.5)';
         cCtx.font = '10px sans-serif';
         cCtx.textAlign = 'right';
-        cCtx.fillText('100%', leftMargin - 4, topMargin);
-        cCtx.fillText('50%', leftMargin - 4, topMargin + chartH / 2);
-        cCtx.fillText('0%', leftMargin - 4, topMargin + chartH);
 
+        // 生成合理的Y轴刻度
+        const yTicks = this.generateYTicks(yMin, yMax);
+        yTicks.forEach(tick => {
+            const yPos = topMargin + chartH - (chartH * (tick - yMin) / yRange);
+            cCtx.fillText(tick.toFixed(0) + '%', leftMargin - 4, yPos + 4);
+        });
+
+        // 绘制网格线
+        cCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+        cCtx.lineWidth = 1;
+        yTicks.forEach(tick => {
+            const yPos = topMargin + chartH - (chartH * (tick - yMin) / yRange);
+            cCtx.beginPath();
+            cCtx.moveTo(leftMargin, yPos);
+            cCtx.lineTo(leftMargin + chartW, yPos);
+            cCtx.stroke();
+        });
+
+        // 绘制曲线
         const pointSpacing = historyData.length > 1 ? chartW / (historyData.length - 1) : 0;
         cCtx.strokeStyle = '#4dabf7';
         cCtx.lineWidth = 2;
         cCtx.beginPath();
         historyData.forEach((data, index) => {
             const x = leftMargin + index * pointSpacing;
-            const y = topMargin + chartH - (chartH * data.totalAcc / 100);
+            const normalizedAcc = (data.totalAcc - yMin) / yRange;
+            const y = topMargin + chartH - (chartH * normalizedAcc);
             if (index === 0) cCtx.moveTo(x, y);
             else cCtx.lineTo(x, y);
         });
         cCtx.stroke();
+
+        // 绘制数据点
+        cCtx.fillStyle = '#4dabf7';
+        historyData.forEach((data, index) => {
+            const x = leftMargin + index * pointSpacing;
+            const normalizedAcc = (data.totalAcc - yMin) / yRange;
+            const y = topMargin + chartH - (chartH * normalizedAcc);
+            cCtx.beginPath();
+            cCtx.arc(x, y, 3, 0, Math.PI * 2);
+            cCtx.fill();
+        });
+    }
+
+    // 生成合理的Y轴刻度
+    generateYTicks(min, max) {
+        const range = max - min;
+        let interval = 10;
+
+        if (range <= 10) interval = 2;
+        else if (range <= 20) interval = 5;
+        else if (range <= 50) interval = 10;
+        else if (range <= 100) interval = 20;
+
+        const ticks = [];
+        const start = Math.ceil(min / interval) * interval;
+        const end = Math.floor(max / interval) * interval;
+
+        for (let i = start; i <= end; i += interval) {
+            if (i >= min && i <= max) {
+                ticks.push(i);
+            }
+        }
+
+        // 确保至少有3个刻度
+        if (ticks.length < 3) {
+            ticks.push(min);
+            ticks.push(max);
+            ticks.sort((a, b) => a - b);
+        }
+
+        return [...new Set(ticks)]; // 去重
     }
 
     createMissEffect(y, track) {

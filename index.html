@@ -84,7 +84,7 @@
                     <span class="ssi-meta" id="settingsSongMeta"></span>
                 </div>
 
-                <div class="settings-group">
+                <div class="settings-group" id="difficultyGroup">
                     <label class="settings-label">DIFFICULTY</label>
                     <div class="diff-selector">
                         <button class="diff-btn" data-diff="easy">EASY</button>
@@ -136,29 +136,67 @@
     <!-- ==================== 结果画面 ==================== -->
     <div id="resultScreen" class="screen hidden">
         <div class="result-overlay">
-            <div class="result-card">
-                <div class="rank" id="rankDisplay">S</div>
-                
-                <div class="stats-grid">
-                    <div class="stat-box"><span class="stat-label">SCORE</span><span class="stat-value" id="finalScore">0</span></div>
-                    <div class="stat-box"><span class="stat-label">MAX COMBO</span><span class="stat-value" id="finalCombo">0</span></div>
-                    <div class="stat-box"><span class="stat-label">ACC</span><span class="stat-value" id="finalAccuracy">0%</span></div>
-                    <div class="stat-box p"><span class="stat-label">PERFECT</span><span class="stat-value" id="finalPerfect">0</span></div>
-                    <div class="stat-box g"><span class="stat-label">GREAT</span><span class="stat-value" id="finalGreat">0</span></div>
-                    <div class="stat-box m"><span class="stat-label">MISS</span><span class="stat-value" id="finalMiss">0</span></div>
+            <div class="result-card" id="resultCard">
+                <!-- 状态指示 -->
+                <div class="result-status" id="resultStatus">
+                    <div class="status-icon" id="statusIcon">🎵</div>
+                    <div class="status-text" id="statusText">COMPLETED</div>
                 </div>
                 
+                <!-- 排名等级 -->
+                <div class="rank-display">
+                    <div class="rank" id="rankDisplay">S</div>
+                    <div class="rank-label" id="rankLabel">PERFECT</div>
+                </div>
+                
+                <!-- 主要成绩 -->
+                <div class="primary-stats">
+                    <div class="stat-big">
+                        <span class="stat-label">SCORE</span>
+                        <span class="stat-value" id="finalScore">0</span>
+                    </div>
+                    <div class="stat-big">
+                        <span class="stat-label">ACCURACY</span>
+                        <span class="stat-value" id="finalAccuracy">0%</span>
+                    </div>
+                </div>
+                
+                <!-- 详细统计 -->
+                <div class="stats-grid">
+                    <div class="stat-box combo">
+                        <span class="stat-label">MAX COMBO</span>
+                        <span class="stat-value" id="finalCombo">0</span>
+                    </div>
+                    <div class="stat-box perfect">
+                        <span class="stat-label">PERFECT</span>
+                        <span class="stat-value" id="finalPerfect">0</span>
+                    </div>
+                    <div class="stat-box great">
+                        <span class="stat-label">GREAT</span>
+                        <span class="stat-value" id="finalGreat">0</span>
+                    </div>
+                    <div class="stat-box miss">
+                        <span class="stat-label">MISS</span>
+                        <span class="stat-value" id="finalMiss">0</span>
+                    </div>
+                </div>
+                
+                <!-- 性能曲线图 -->
                 <div class="chart-box">
                     <span class="chart-title">PERFORMANCE</span>
                     <canvas id="lineChartCanvas"></canvas>
                 </div>
                 
+                <!-- 按钮操作 -->
                 <div class="result-actions">
-                    <button class="btn btn-purple" id="exportBtn">EXPORT RESULT</button>
-                    <button class="btn btn-primary" id="homeBtn">HOME</button>
+                    <button class="btn btn-secondary" id="exportBtn">📊 EXPORT RESULT</button>
+                    <button class="btn btn-primary" id="homeBtn">🏠 HOME</button>
                 </div>
             </div>
         </div>
+        
+        <!-- 隐藏的结算音频播放器 -->
+        <audio id="resultAudio" preload="auto"></audio>
     </div>
 
     <!-- ==================== 移动端控制 ==================== -->

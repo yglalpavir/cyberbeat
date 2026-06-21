@@ -48,6 +48,7 @@ class UIManager {
         this.settingsSongTitle  = document.getElementById('settingsSongTitle');
         this.settingsSongArtist = document.getElementById('settingsSongArtist');
         this.settingsSongMeta   = document.getElementById('settingsSongMeta');
+        this.difficultyGroup    = document.getElementById('difficultyGroup');
         this.speedValue         = document.getElementById('speedValue');
 
         // 音量
@@ -481,8 +482,16 @@ class UIManager {
 
         this.settingsSongMeta.textContent = [bpmText, durText].filter(Boolean).join('  •  ');
 
+        // MC 谱面不显示难度选择（谱面固定，难度无影响）
+        const isMc = selectedLibrarySong?.beatmapType === 'mc';
+        if (this.difficultyGroup) {
+            this.difficultyGroup.style.display = isMc ? 'none' : '';
+        }
+
         // 根据歌曲的 difficulties 字段过滤难度按钮
-        this.filterDifficultyButtons();
+        if (!isMc) {
+            this.filterDifficultyButtons();
+        }
 
         this.startScreen.classList.add('hidden');
         this.settingsScreen.classList.remove('hidden');
@@ -612,8 +621,35 @@ class UIManager {
         else if (accuracy >= 85) rank = 'A';
         else if (accuracy >= 70) rank = 'B';
 
-        this.rankDisplay.textContent = rank;
-        this.rankDisplay.className = 'rank';
+        // 判断是否失败
+        const isGameFailed = gameState.health <= 0;
+        
+        // 获取 DOM 元素
+        const resultCard = document.getElementById('resultCard');
+        const rankDisplay = document.getElementById('rankDisplay');
+        const rankLabel = document.getElementById('rankLabel');
+        const statusEl = document.getElementById('resultStatus');
+        const statusIcon = document.getElementById('statusIcon');
+        const statusText = document.getElementById('statusText');
+
+        // 更新排名显示
+        rankDisplay.textContent = rank;
+        rankDisplay.className = 'rank';
+        
+        // 根据状态更新 UI 样式
+        if (isGameFailed) {
+            resultCard.classList.add('result-failed');
+            statusEl.classList.add('failed');
+            statusIcon.textContent = '❌';
+            statusText.textContent = 'FAILED';
+            rankLabel.textContent = 'FAILED';
+        } else {
+            resultCard.classList.remove('result-failed');
+            statusEl.classList.remove('failed');
+            statusIcon.textContent = '✓';
+            statusText.textContent = 'COMPLETED';
+            rankLabel.textContent = isGameFailed ? 'FAILED' : this.getRankLabel(rank);
+        }
 
         this.finalScore.textContent    = gameState.score.toLocaleString();
         this.finalCombo.textContent    = gameState.maxCombo;
@@ -627,6 +663,34 @@ class UIManager {
         }
 
         this.resultScreen.classList.remove('hidden');
+        
+        // 播放结算音乐
+        this.playResultAudio(isGameFailed);
+    }
+
+    // 根据等级返回标签文本
+    getRankLabel(rank) {
+        const rankLabels = {
+            'S': 'PERFECT',
+            'A': 'EXCELLENT',
+            'B': 'GOOD',
+            'C': 'PASS'
+        };
+        return rankLabels[rank] || 'PASS';
+    }
+
+    // 播放结算音乐
+    async playResultAudio(isFailed) {
+        // 获取结算音乐路径
+        const audioPath = isFailed
+            ? 'assets/result-audio/failed.mp3'
+            : 'assets/result-audio/completed.mp3';
+
+        // 使用 AudioEngine 的 Web Audio API 加载并播放
+        const loaded = await audioEngine.loadAudioFile(audioPath);
+        if (loaded) {
+            audioEngine.startAudioPlayback(0);
+        }
     }
 
     goToHome() {

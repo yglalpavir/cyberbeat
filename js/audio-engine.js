@@ -248,6 +248,17 @@ class AudioEngine {
         if (this.context.state === 'suspended') this.context.resume();
         this.isPlaying = true;
 
+        // 确保 masterGain 连接到了音频输出
+        try {
+            this.masterGain.disconnect();
+        } catch (e) { /* 可能未连接 */ }
+        if (this.limiter) {
+            this.masterGain.connect(this.limiter);
+            this.limiter.connect(this.context.destination);
+        } else {
+            this.masterGain.connect(this.context.destination);
+        }
+
         this.audioSource = this.context.createBufferSource();
         this.audioSource.buffer = this.audioBuffer;
 

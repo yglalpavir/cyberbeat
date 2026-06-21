@@ -17,6 +17,33 @@
       "title": "Adjudicatorz-断罪-",
       "artist": "JurokuNeta.",
       "preview": null
+    },
+    {
+      "id": "3",
+      "audio": "Haikyo,_Kikai_and_Shizen.ogg",
+      "beatmap": "Haikyo,_Kikai_and_Shizen.mc",
+      "beatmapType": "mc",
+      "title": "Haikyo,_Kikai_and_Shizen",
+      "artist": "Arkplot",
+      "preview": null
+    },
+    {
+      "id": "4",
+      "audio": "the_world_of_scarlet.ogg",
+      "beatmap": "the_world_of_scarlet.mc",
+      "beatmapType": "mc",
+      "title": "the_world_of_scarlet",
+      "artist": "OfficialAz3",
+      "preview": null
+    },
+    {
+      "id": "5",
+      "audio": "Regular-5.ogg",
+      "beatmap": "Regular-5.mc",
+      "beatmapType": "mc",
+      "title": "Regular-5",
+      "artist": "Various Artists",
+      "preview": null
     }
   ]
 }
