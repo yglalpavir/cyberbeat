@@ -99,18 +99,47 @@ class AudioEngine {
     playHitSound(type) {
         if (!this.context) return;
         const hitCfg = getHitSoundConfig();
+        // Oscillator 不能复用（只能 start 一次），必须每次新建
         const osc = this.context.createOscillator();
-        const gain = this.context.createGain();
+        // Gain 可以池化复用
+        const gain = this._getGain();
         osc.type = 'square';
         if (type === 'perfect') osc.frequency.value = hitCfg.perfectFreq;
         else if (type === 'great') osc.frequency.value = hitCfg.greatFreq;
         else osc.frequency.value = hitCfg.missFreq;
-        gain.gain.setValueAtTime(hitCfg.gain, this.context.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + hitCfg.duration);
+        const now = this.context.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(hitCfg.gain, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + hitCfg.duration);
         osc.connect(gain);
         gain.connect(this.masterGain);
-        osc.start();
-        osc.stop(this.context.currentTime + hitCfg.duration);
+        osc.start(now);
+        osc.stop(now + hitCfg.duration);
+        // Oscillator 用完即弃，Gain 归还池
+        osc.onended = () => {
+            this._releaseGain(gain);
+            try { gain.disconnect(); } catch(e) {}
+        };
+
+        // 记录音频延迟
+        if (perfMonitor) {
+            const actualTime = this.context.currentTime;
+            if (actualTime > now) {
+                perfMonitor.recordAudioLatency((actualTime - now) * 1000);
+            }
+        }
+    }
+
+    // ========== Gain 节点池 (Oscillator 不可复用) ==========
+    _gainPool = [];
+
+    _getGain() {
+        if (this._gainPool.length > 0) return this._gainPool.pop();
+        return this.context.createGain();
+    }
+
+    _releaseGain(gain) {
+        if (this._gainPool.length < 32) this._gainPool.push(gain);
     }
     
     startPresetMusic() {

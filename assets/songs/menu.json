@@ -7,7 +7,10 @@
       "title": "Last",
       "artist": "onoken",
       "preview": null,
-      "difficulties": ["normal", "normal+"]
+      "difficulties": [
+        { "key": "normal",  "name": "NORMAL", "level": 7 },
+        { "key": "normal+", "name": "HARD",   "level": 28 }
+      ]
     },
     {
       "id": "2",
@@ -16,7 +19,9 @@
       "beatmapType": "mc",
       "title": "Adjudicatorz-断罪-",
       "artist": "JurokuNeta.",
-      "preview": null
+      "preview": null,
+      "level": 23,
+      "difficultyName": "NORMAL"
     },
     {
       "id": "3",
@@ -25,7 +30,9 @@
       "beatmapType": "mc",
       "title": "Haikyo,_Kikai_and_Shizen",
       "artist": "Arkplot",
-      "preview": null
+      "preview": null,
+      "level": 31,
+      "difficultyName": "HARD"
     },
     {
       "id": "4",
@@ -34,7 +41,9 @@
       "beatmapType": "mc",
       "title": "the_world_of_scarlet",
       "artist": "OfficialAz3",
-      "preview": null
+      "preview": null,
+      "level": 26,
+      "difficultyName": "NORMAL"
     },
     {
       "id": "5",
@@ -43,7 +52,9 @@
       "beatmapType": "mc",
       "title": "Regular-5",
       "artist": "Various Artists",
-      "preview": null
+      "preview": null,
+      "level": 27,
+      "difficultyName": "Special"
     }
   ]
 }

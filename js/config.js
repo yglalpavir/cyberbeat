@@ -2,14 +2,38 @@
 
 const CONFIG = {
     trackCount: 4,
-    trackWidth: 80,          // 增大轨道宽度
-    trackSpacing: 12,        // 轨道间距（新增）
+    trackWidth: 80,
+    trackSpacing: 12,
     judgmentLineY: 0.85,
     perfectWindow: 40,
     greatWindow: 90,
     bpm: 180,
     songDuration: 50000,
     statsInterval: 2000,
+
+    // 血量
+    health: {
+        initial: 100,
+        gainOnHit: 2,
+        lossOnMiss: 10
+    },
+
+    // 视觉效果时长
+    effects: {
+        judgmentRiseSpeed: 0.8,
+        judgmentFadeRate: 0.01,
+        judgmentInitialBounce: 1.2,
+        judgmentMaxDuration: 1.5,
+
+        particleLifeDecay: 0.025,
+        particleSpeed: 4,
+        particleCount: 8,
+        particleMaxDuration: 1.2,
+
+        laserGrowSpeed: 10,
+        laserFadeRate: 0.025,
+        laserMaxDuration: 1.0
+    },
     
     difficulties: {
         'easy':       { interval: 400, trackInterval: 800, maxDensity: 3,  energyThreshold: 0.6 },
@@ -30,6 +54,50 @@ const CONFIG = {
     // 倒计时时长 (ms)
     countdownDuration: 3000
 };
+
+// ==================== 从 judge.json 加载判定配置 ====================
+let JUDGE_CONFIG = null;
+
+async function loadJudgeConfig() {
+    try {
+        const response = await fetch('data/judge.json');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        JUDGE_CONFIG = await response.json();
+
+        // 合并到 CONFIG
+        if (JUDGE_CONFIG.perfectWindow !== undefined) CONFIG.perfectWindow = JUDGE_CONFIG.perfectWindow;
+        if (JUDGE_CONFIG.greatWindow !== undefined)   CONFIG.greatWindow   = JUDGE_CONFIG.greatWindow;
+        if (JUDGE_CONFIG.judgmentLineY !== undefined)  CONFIG.judgmentLineY  = JUDGE_CONFIG.judgmentLineY;
+
+        if (JUDGE_CONFIG.health) {
+            if (JUDGE_CONFIG.health.initial    !== undefined) CONFIG.health.initial    = JUDGE_CONFIG.health.initial;
+            if (JUDGE_CONFIG.health.gainOnHit  !== undefined) CONFIG.health.gainOnHit  = JUDGE_CONFIG.health.gainOnHit;
+            if (JUDGE_CONFIG.health.lossOnMiss !== undefined) CONFIG.health.lossOnMiss = JUDGE_CONFIG.health.lossOnMiss;
+        }
+
+        if (JUDGE_CONFIG.effects) {
+            const e = JUDGE_CONFIG.effects;
+            if (e.judgmentRiseSpeed     !== undefined) CONFIG.effects.judgmentRiseSpeed     = e.judgmentRiseSpeed;
+            if (e.judgmentFadeRate      !== undefined) CONFIG.effects.judgmentFadeRate      = e.judgmentFadeRate;
+            if (e.judgmentInitialBounce !== undefined) CONFIG.effects.judgmentInitialBounce = e.judgmentInitialBounce;
+            if (e.judgmentMaxDuration   !== undefined) CONFIG.effects.judgmentMaxDuration   = e.judgmentMaxDuration;
+            if (e.particleLifeDecay     !== undefined) CONFIG.effects.particleLifeDecay     = e.particleLifeDecay;
+            if (e.particleSpeed         !== undefined) CONFIG.effects.particleSpeed         = e.particleSpeed;
+            if (e.particleCount         !== undefined) CONFIG.effects.particleCount         = e.particleCount;
+            if (e.particleMaxDuration   !== undefined) CONFIG.effects.particleMaxDuration   = e.particleMaxDuration;
+            if (e.laserGrowSpeed        !== undefined) CONFIG.effects.laserGrowSpeed        = e.laserGrowSpeed;
+            if (e.laserFadeRate         !== undefined) CONFIG.effects.laserFadeRate         = e.laserFadeRate;
+            if (e.laserMaxDuration      !== undefined) CONFIG.effects.laserMaxDuration      = e.laserMaxDuration;
+        }
+
+        console.log('Judge config loaded:', JUDGE_CONFIG);
+        return JUDGE_CONFIG;
+    } catch (err) {
+        console.warn('Failed to load data/judge.json, using built-in defaults:', err);
+        JUDGE_CONFIG = null;
+        return null;
+    }
+}
 
 // ==================== 输入映射 ====================
 

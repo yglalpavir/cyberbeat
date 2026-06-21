@@ -12,7 +12,7 @@ class GameState {
         this.perfect = 0;
         this.great = 0;
         this.miss = 0;
-        this.health = 100;
+        this.health = CONFIG.health.initial;
         this.startTime = 0;
         this.notes = [];
         this.particles = [];

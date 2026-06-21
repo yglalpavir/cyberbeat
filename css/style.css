@@ -71,6 +71,10 @@ body {
     width: 100vw;
     cursor: default;
     -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: auto;
+    touch-action: manipulation;
+    position: fixed;
 }
 
 /* ============================================================
@@ -84,6 +88,8 @@ body {
     width: 100%;
     height: 100%;
     z-index: 5;
+    touch-action: none;
+    will-change: contents;
 }
 
 /* ============================================================
@@ -414,6 +420,110 @@ body {
 
 .song-card:hover .card-arrow {
     transform: translateX(3px);
+}
+
+/* ============================================================
+   难度徽章 (Level Badge) — 扁平化设计
+   范围 0-13 / 14-23 / 24-31 / 32-37 / 38+
+   ============================================================ */
+
+/* 多徽章容器（MIDI 多难度时包裹多个 .card-level） */
+.card-levels {
+    display: flex;
+    gap: 5px;
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+/* 单徽章（MC 歌曲）直接作为 flex 子元素时靠右 */
+.card-level {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 5px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    /* 扁平：纯色半透明底色 */
+    background: rgba(255, 255, 255, 0.04);
+    border: 1.5px solid currentColor;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.card-level .level-label {
+    font-size: 0.38rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    line-height: 1;
+    margin-bottom: 1px;
+    opacity: 0.75;
+}
+
+.card-level .level-number {
+    font-size: 1.25rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.5px;
+}
+
+.card-level .level-diff {
+    font-size: 0.36rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    line-height: 1;
+    margin-top: 1px;
+    opacity: 0.65;
+}
+
+/* ---- 选中歌曲时徽章增强 ---- */
+.song-card.selected .card-level {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: currentColor;
+}
+
+/* ====== 难度颜色主题 (0-13 EASY) ====== */
+.card-level.lvl-easy { color: #4dd4c0; }
+.card-level.lvl-easy .level-label,
+.card-level.lvl-easy .level-number,
+.card-level.lvl-easy .level-diff {
+    color: #4dd4c0;
+}
+
+/* ====== 难度颜色主题 (14-23 NORMAL) ====== */
+.card-level.lvl-normal { color: #4dabf7; }
+.card-level.lvl-normal .level-label,
+.card-level.lvl-normal .level-number,
+.card-level.lvl-normal .level-diff {
+    color: #4dabf7;
+}
+
+/* ====== 难度颜色主题 (24-31 HARD) ====== */
+.card-level.lvl-hard { color: #ffd43b; }
+.card-level.lvl-hard .level-label,
+.card-level.lvl-hard .level-number,
+.card-level.lvl-hard .level-diff {
+    color: #ffd43b;
+}
+
+/* ====== 难度颜色主题 (32-37 EXPERT) ====== */
+.card-level.lvl-expert { color: #ff6b6b; }
+.card-level.lvl-expert .level-label,
+.card-level.lvl-expert .level-number,
+.card-level.lvl-expert .level-diff {
+    color: #ff6b6b;
+}
+
+/* ====== 难度颜色主题 (38+ MASTER) ====== */
+.card-level.lvl-master { color: #c44dff; }
+.card-level.lvl-master .level-label,
+.card-level.lvl-master .level-number,
+.card-level.lvl-master .level-diff {
+    color: #c44dff;
 }
 
 /* 导入卡片 */
@@ -1030,6 +1140,37 @@ body {
 }
 
 /* ============================================================
+   性能监控面板
+   ============================================================ */
+#perfMonitor {
+    position: fixed;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    padding: 4px 14px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-family: var(--font-mono);
+    pointer-events: none;
+}
+
+.perf-item {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.perf-good { color: #69db7c; }
+.perf-warn { color: #ffd43b; }
+.perf-bad  { color: #ff6b6b; }
+
+/* ============================================================
    移动端控制
    ============================================================ */
 #mobileControls {
@@ -1038,20 +1179,20 @@ body {
     bottom: 0;
     left: 0;
     width: 100%;
-    height: 80px;
     z-index: 20;
     pointer-events: none;
+    padding: env(safe-area-inset-bottom, 12px) 8px 12px 8px;
 }
 
 .mobile-btns {
     display: flex;
     justify-content: center;
-    gap: 6px;
-    height: 100%;
-    padding: 8px;
+    gap: 8px;
+    height: 70px;
     pointer-events: auto;
-    max-width: 400px;
+    max-width: 480px;
     margin: 0 auto;
+    padding: 4px;
 }
 
 .mobile-btn {
@@ -1060,45 +1201,218 @@ body {
     align-items: center;
     justify-content: center;
     font-family: var(--font-family);
-    font-size: 1.3rem;
+    font-size: 1.4rem;
     font-weight: 700;
     color: #fff;
-    border: none;
-    border-radius: var(--radius-sm);
+    border: 2px solid transparent;
+    border-radius: var(--radius-md);
     cursor: pointer;
-    transition: filter 0.1s;
+    transition: transform 0.08s ease, opacity 0.1s, box-shadow 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    position: relative;
+    overflow: hidden;
 }
 
-.mobile-btn:nth-child(1) { background: #4dabf7; }
-.mobile-btn:nth-child(2) { background: #69db7c; }
-.mobile-btn:nth-child(3) { background: #ff6b6b; }
-.mobile-btn:nth-child(4) { background: #ffd43b; color: #000; }
+.mobile-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.15);
+    opacity: 0;
+    transition: opacity 0.1s;
+    border-radius: inherit;
+}
+
+.mobile-btn:active,
+.mobile-btn.active {
+    transform: scale(0.93);
+    opacity: 0.85;
+}
+
+.mobile-btn:active::after,
+.mobile-btn.active::after {
+    opacity: 1;
+}
+
+.mobile-btn:nth-child(1) { background: #4dabf7; border-color: rgba(77, 171, 247, 0.5); }
+.mobile-btn:nth-child(2) { background: #69db7c; border-color: rgba(105, 219, 124, 0.5); }
+.mobile-btn:nth-child(3) { background: #ff6b6b; border-color: rgba(255, 107, 107, 0.5); }
+.mobile-btn:nth-child(4) { background: #ffd43b; color: #000; border-color: rgba(255, 212, 59, 0.5); }
+
+/* 移动端提示标签 (显示按键字母) */
+.mobile-btn::before {
+    content: attr(data-track-label);
+    position: absolute;
+    top: 4px;
+    font-size: 0.55rem;
+    font-weight: 400;
+    opacity: 0.5;
+    letter-spacing: 0.5px;
+}
 
 /* ============================================================
-   响应式
+   响应式 - 手机 (< 768px)
    ============================================================ */
 @media (max-width: 768px) {
     #mobileControls { display: block; }
-    
+    #perfMonitor { top: auto; bottom: 90px; font-size: 0.6rem; padding: 3px 10px; gap: 8px; }
+
+    html { font-size: 15px; }
+
     .start-layout {
         flex-direction: column;
-        width: 94vw;
-        max-height: 85vh;
-        gap: 12px;
+        width: 96vw;
+        max-height: 88vh;
+        max-height: 88dvh;
+        gap: 10px;
     }
-    
+
     .start-sidebar {
         width: 100%;
         flex-direction: row;
         flex-wrap: wrap;
-        padding: 18px 14px;
-        gap: 10px;
+        align-items: center;
+        padding: 16px 12px;
+        gap: 8px;
     }
-    
-    .logo { font-size: 1.5rem; }
-    .subtitle { font-size: 0.6rem; }
-    
-    .song-panel {
-        min-height: 260px;
+
+    .logo-block {
+        flex: 1;
+        text-align: left;
     }
+
+    .logo { font-size: 1.4rem; }
+    .subtitle { font-size: 0.55rem; letter-spacing: 2px; }
+
+    .current-selection {
+        flex: 2;
+        min-height: auto;
+        padding: 10px 8px;
+    }
+
+    .start-actions {
+        flex: 1;
+        flex-direction: row;
+        min-width: 100%;
+    }
+
+    .start-actions .btn { font-size: 0.75rem; padding: 10px 12px; }
+
+    .start-main { max-height: 50vh; }
+
+    .song-panel { min-height: 220px; }
+
+    .song-card { padding: 10px 10px; }
+    .card-title { font-size: 0.78rem; }
+    .card-sub { font-size: 0.65rem; }
+
+    .settings-card {
+        width: 94vw;
+        padding: 20px;
+        gap: 14px;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .diff-selector { grid-template-columns: repeat(4, 1fr); gap: 3px; }
+    .diff-btn { padding: 10px 2px; font-size: 0.68rem; }
+
+    .result-card {
+        max-width: 96vw;
+        padding: 20px 16px;
+        gap: 16px;
+    }
+
+    .rank { font-size: 3.5rem; }
+    .stat-big .stat-value { font-size: 1.3rem; }
+    .stats-grid { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .stat-box { padding: 8px 4px; }
+    .stat-value { font-size: 0.85rem; }
+
+    .chart-box { height: 120px; }
+
+    .result-actions .btn { font-size: 0.8rem; padding: 10px 14px; }
+
+    /* 移动端横屏优化 */
+    @media (orientation: landscape) {
+        .start-layout {
+            flex-direction: row;
+            max-height: 70vh;
+            max-height: 70dvh;
+            gap: 10px;
+        }
+
+        .start-sidebar {
+            width: 200px;
+            flex-direction: column;
+            padding: 12px;
+        }
+
+        .start-main { max-height: none; }
+
+        .logo { font-size: 1.2rem; }
+        .start-actions { flex-direction: column; min-width: auto; }
+
+        .song-card { padding: 8px; }
+        .card-meta { display: none; }
+
+        #mobileControls { display: none; }
+
+        #perfMonitor {
+            top: 4px;
+            bottom: auto;
+            font-size: 0.55rem;
+            padding: 2px 8px;
+            gap: 6px;
+        }
+    }
+}
+
+/* ============================================================
+   响应式 - 小手机 (< 380px)
+   ============================================================ */
+@media (max-width: 380px) {
+    html { font-size: 14px; }
+
+    .mobile-btns { height: 58px; gap: 4px; max-width: 100%; padding: 2px; }
+    .mobile-btn { font-size: 1.2rem; border-radius: 10px; }
+
+    #perfMonitor { bottom: 72px; }
+
+    .logo { font-size: 1.2rem; }
+    .start-sidebar { padding: 10px 8px; }
+
+    .song-card { padding: 8px 6px; }
+    .card-icon { font-size: 1rem; width: 22px; }
+    .card-title { font-size: 0.72rem; }
+    .card-sub { font-size: 0.6rem; }
+    .card-meta { display: none; }
+    .card-arrow { display: none; }
+
+    .settings-card { padding: 14px; gap: 10px; }
+    .diff-btn { font-size: 0.62rem; padding: 8px 1px; }
+
+    .result-card { padding: 14px 10px; }
+    .rank { font-size: 3rem; }
+    .stats-grid { gap: 4px; }
+    .stat-box { padding: 6px 2px; }
+}
+
+/* ============================================================
+   响应式 - 平板 (768px - 1024px)
+   ============================================================ */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .start-layout { max-width: 92vw; gap: 18px; }
+    .start-sidebar { width: 230px; }
+
+    #perfMonitor {
+        top: 6px;
+        font-size: 0.7rem;
+        padding: 5px 16px;
+    }
+
+    .result-card { max-width: 480px; }
 }

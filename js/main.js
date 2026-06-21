@@ -1,67 +1,107 @@
-// ==================== 主入口 ====================
+// ==================== 主入口 (性能优化版) ====================
 
 let renderer;
 let ui;
+let _lastFrameTime = 0;
+let _frameSkipAccum = 0;
 
 async function init() {
-    // 先加载音频配置
+    // 加载配置
     await loadAudioConfig();
-    
+    await loadJudgeConfig();
+
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     renderer = new Renderer(canvas, ctx);
     ui = new UIManager();
-    
+
+    // 防止 canvas 被浏览器默认手势干扰
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
     window.addEventListener('resize', () => {
         if (renderer) renderer.resize();
     });
-    
+
+    // 性能监控快捷切换: 按 ~ 键
+    document.addEventListener('keydown', (e) => {
+        if (e.key === '`' || e.key === '~') {
+            e.preventDefault();
+            perfMonitor.toggle();
+        }
+    });
+
+    _lastFrameTime = performance.now();
     requestAnimationFrame(renderStartScreen);
 }
 
-function renderStartScreen(timestamp) {
+function renderStartScreen(ts) {
     if (gameState.screen !== 'start') return;
+    perfMonitor.beginFrame();
     const ctx = renderer.ctx;
-    ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
-    renderer.drawBackground(timestamp || performance.now());
+    renderer.drawBackground(ts);
+    perfMonitor.endFrame();
     requestAnimationFrame(renderStartScreen);
 }
 
-// 全局游戏循环
+// 全局游戏循环 - 垂直同步平滑帧
 function gameLoop(timestamp) {
     if (gameState.screen !== 'game') return;
-    
+
+    perfMonitor.beginFrame();
+
+    // === 帧时序平滑 (VSync) ===
+    // 限制最大帧间隔为 50ms (20fps 下限)，防止大跳帧导致的间断感
+    let rawDelta = timestamp - _lastFrameTime;
+    if (rawDelta <= 0) rawDelta = 16.67;
+    const frameDelta = Math.min(rawDelta, 50);
+    _lastFrameTime = timestamp;
+
+    // 帧跳过保护：累积过多时直接丢弃（防止螺旋式掉帧）
+    _frameSkipAccum += rawDelta;
+    if (_frameSkipAccum > 100) {
+        _frameSkipAccum = 0;
+        // 跳帧时仍需驱动游戏逻辑时间
+    }
+
     const now = performance.now();
-    const elapsed = now - gameState.startTime;
-    const countdownRemaining = (gameState.startTime - now) / 1000; // 倒计时剩余秒数
-    
-    // 倒计时期间仍绘制界面
+    const countdownRemaining = (gameState.startTime - now) / 1000;
+
+    // 倒计时期间
     if (countdownRemaining > 0) {
         const ctx = renderer.ctx;
         ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
-        renderer.drawBackground(elapsed > 0 ? elapsed : 0);
+        renderer.drawBackground(0);
         renderer.drawTracks();
         renderer.drawCountdown(countdownRemaining);
-        renderer.drawHUD(); // 可选显示空白 HUD
+        renderer.drawHUD();
+        perfMonitor.endFrame();
         requestAnimationFrame(gameLoop);
         return;
     }
-    
-    const currentTime = elapsed;
+
+    const currentTime = now - gameState.startTime;
+
+    // 统计间隔记录
     if (currentTime - (gameState.intervalStartTime - gameState.startTime) >= CONFIG.statsInterval) {
         gameState.recordIntervalStats();
         gameState.intervalStartTime = now;
     }
-    
+
+    // 游戏结束判断
     const duration = loadedMcData
         ? loadedMcData.meta.duration * 1000
         : (loadedMidiData ? loadedMidiData.duration * 1000 : CONFIG.songDuration);
     if (currentTime > duration + 2000 || gameState.health <= 0) {
         if (ui) ui.endGame();
+        perfMonitor.endFrame();
         return;
     }
-    
+
+    // Frame delta for time-based effects
+    if (renderer) renderer.setFrameDelta(frameDelta);
+
+    // === 主渲染 ===
     const ctx = renderer.ctx;
     ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
     renderer.drawBackground(currentTime);
@@ -72,9 +112,10 @@ function gameLoop(timestamp) {
     renderer.drawJudgments();
     renderer.drawHUD();
 
-    // Hold 长条状态更新（每帧检查）
+    // Hold 长条状态更新
     ui.updateHolds();
 
+    perfMonitor.endFrame();
     requestAnimationFrame(gameLoop);
 }
 

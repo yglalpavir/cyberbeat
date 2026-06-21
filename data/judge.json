@@ -1,0 +1,30 @@
+{
+    "_comment": "CyberBeat 判定配置文件。修改数值后刷新页面即可生效。",
+
+    "perfectWindow": 40,
+    "greatWindow": 90,
+
+    "judgmentLineY": 0.85,
+
+    "health": {
+        "initial": 100,
+        "gainOnHit": 2,
+        "lossOnMiss": 10
+    },
+
+    "effects": {
+        "judgmentRiseSpeed": 0.8,
+        "judgmentFadeRate": 0.01,
+        "judgmentInitialBounce": 1.2,
+        "judgmentMaxDuration": 1.5,
+
+        "particleLifeDecay": 0.025,
+        "particleSpeed": 4,
+        "particleCount": 8,
+        "particleMaxDuration": 1.2,
+
+        "laserGrowSpeed": 10,
+        "laserFadeRate": 0.025,
+        "laserMaxDuration": 1.0
+    }
+}

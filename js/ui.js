@@ -177,6 +177,9 @@ class UIManager {
         card.className = 'song-card';
         card.dataset.songIndex = index;
 
+        // 难度徽章（右侧显示；MIDI 多难度时为一个容器包裹多个徽章）
+        const levelBadgeHTML = this.buildLevelBadge(song);
+
         card.innerHTML = `
             <div class="card-body">
                 <div class="card-icon">🎵</div>
@@ -188,12 +191,69 @@ class UIManager {
                     ${song.bpm ? `<span class="card-bpm">BPM ${song.bpm}</span>` : ''}
                     ${song.duration ? `<span class="card-duration">${this.escapeHTML(song.duration)}</span>` : ''}
                 </div>
+                ${levelBadgeHTML}
                 <div class="card-arrow">→</div>
             </div>
         `;
 
         card.addEventListener('click', () => this.selectLibrarySong(song, index));
         return card;
+    }
+
+    /**
+     * 根据 level 数字推断颜色主题 CSS class
+     * 范围：0-13(EASY), 14-23(NORMAL), 24-31(HARD), 32-37(EXPERT), 38+(MASTER)
+     */
+    _levelToTheme(level) {
+        if (level <= 13) return 'lvl-easy';
+        if (level <= 23) return 'lvl-normal';
+        if (level <= 31) return 'lvl-hard';
+        if (level <= 37) return 'lvl-expert';
+        return 'lvl-master';
+    }
+
+    /**
+     * 根据 song JSON 数据构建难度徽章 HTML（纯数据驱动）
+     * - difficulties 为 [{name, level}] 数组 → 多徽章
+     * - 否则使用 song.level + song.difficultyName → 单徽章
+     */
+    buildLevelBadge(song) {
+        // --- 多难度（difficulties 为对象数组）---
+        if (Array.isArray(song.difficulties) && song.difficulties.length > 0 &&
+            typeof song.difficulties[0] === 'object') {
+            const badges = song.difficulties.map(d => {
+                const lv = typeof d.level === 'number' ? d.level : parseInt(d.level);
+                if (isNaN(lv) || lv < 0) return '';
+                const cls = this._levelToTheme(lv);
+                const name = d.name || '';
+                return this._buildSingleBadge(lv, cls, name);
+            }).filter(Boolean);
+
+            if (badges.length === 0) return '';
+            return `<div class="card-levels">${badges.join('')}</div>`;
+        }
+
+        // --- 单难度（song.level + song.difficultyName）---
+        const level = typeof song.level === 'number' ? song.level : parseInt(song.level);
+        if (isNaN(level) || level < 0) return '';
+
+        const cls = this._levelToTheme(level);
+        const displayDiff = song.difficultyName || '';
+
+        return this._buildSingleBadge(level, cls, displayDiff);
+    }
+
+    /**
+     * 生成单个难度徽章 HTML
+     */
+    _buildSingleBadge(level, cssClass, diffName) {
+        return `
+            <div class="card-level ${cssClass}">
+                <span class="level-label">LEVEL</span>
+                <span class="level-number">${level}</span>
+                <span class="level-diff">${this.escapeHTML(diffName)}</span>
+            </div>
+        `;
     }
 
     escapeHTML(str) {
@@ -499,27 +559,36 @@ class UIManager {
 
     /**
      * 根据当前选中歌曲的 difficulties 数组，启用/禁用难度按钮
+     * difficulties 支持两种格式：
+     *   - 字符串数组 ["normal", "normal+"] （key 直用）
+     *   - 对象数组 [{key:"normal", name:"NORMAL", level:12}] （取 .key）
      * MC 谱面不限制难度（已固定谱面）
      * 导入的 MIDI 文件默认允许全部难度
      */
     filterDifficultyButtons() {
-        let allowedDiffs = null;
+        let allowedKeys = null;
 
-        // MC 谱面：不禁用任何难度按钮（谱面固定，难度选择不影响实际谱面）
         if (selectedLibrarySong?.beatmapType === 'mc') {
-            allowedDiffs = null;
+            allowedKeys = null;
         } else if (selectedSongSource === 'library' && selectedLibrarySong
-            && selectedLibrarySong.difficulties && selectedLibrarySong.difficulties.length > 0) {
-            allowedDiffs = selectedLibrarySong.difficulties;
+            && Array.isArray(selectedLibrarySong.difficulties) && selectedLibrarySong.difficulties.length > 0) {
+            // 从 difficulties 提取 CONFIG 难度键
+            const raw = selectedLibrarySong.difficulties;
+            allowedKeys = raw.map(d => {
+                if (typeof d === 'string') return d;
+                if (typeof d === 'object' && d.key) return d.key;
+                return null;
+            }).filter(Boolean);
+            if (allowedKeys.length === 0) allowedKeys = null;
         }
-        // 导入的 MIDI 或空 difficulties 数组不限制难度（allowedDiffs 为 null 表示全部允许）
+        // allowedKeys 为 null 表示全部允许
 
         const diffBtns = document.querySelectorAll('.diff-btn');
         let firstAvailable = null;
 
         diffBtns.forEach(btn => {
             const diff = btn.dataset.diff;
-            const isAllowed = !allowedDiffs || allowedDiffs.includes(diff);
+            const isAllowed = !allowedKeys || allowedKeys.includes(diff);
             btn.disabled = !isAllowed;
             btn.classList.toggle('disabled', !isAllowed);
 
@@ -529,7 +598,7 @@ class UIManager {
         });
 
         // 如果当前选中的难度不在允许列表中，自动切换到第一个可用难度
-        const currentAllowed = !allowedDiffs || allowedDiffs.includes(selectedDifficulty);
+        const currentAllowed = !allowedKeys || allowedKeys.includes(selectedDifficulty);
         if (!currentAllowed && firstAvailable) {
             this.setDifficulty(firstAvailable);
         }
@@ -571,6 +640,9 @@ class UIManager {
 
         // 重置游戏状态
         gameState.reset();
+
+        // 重置渲染器对象池
+        if (renderer) renderer.resetPools();
 
         // 设置未来时间实现倒计时（谱面时间从倒计时结束时开始计算）
         const countdownMs = CONFIG.countdownDuration;
@@ -830,70 +902,145 @@ class UIManager {
         });
     }
 
-    // ========== 移动端控制 ==========
+    // ========== 移动端控制 (增强版) ==========
     setupMobileControls() {
+        // 检测是否为触屏设备
+        this._isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+        // HTML 按钮绑定
         const mobileBtns = document.querySelectorAll('.mobile-btn');
         mobileBtns.forEach((btn, index) => {
-            btn.addEventListener('touchstart', (e) => {
+            // pointerdown/pointerup 同时支持触摸和鼠标
+            btn.addEventListener('pointerdown', (e) => {
                 e.preventDefault();
                 btn.classList.add('active');
                 gameState.pressedKeys.add(KEYS[index]);
 
-                if (gameState.screen === 'start') {
-                    this.handleStartOrConfig();
-                } else if (gameState.screen === 'game') {
+                if (gameState.screen === 'game') {
                     this.checkHit(index);
                 }
             });
 
-            btn.addEventListener('touchend', (e) => {
+            btn.addEventListener('pointerup', (e) => {
                 e.preventDefault();
                 btn.classList.remove('active');
-                // Hold 释放检查
                 if (gameState.screen === 'game') {
                     this.checkHoldRelease(index);
                 }
                 gameState.pressedKeys.delete(KEYS[index]);
             });
+
+            btn.addEventListener('pointerleave', (e) => {
+                btn.classList.remove('active');
+                if (gameState.screen === 'game') {
+                    this.checkHoldRelease(index);
+                }
+                gameState.pressedKeys.delete(KEYS[index]);
+            });
+
+            // 防止双击缩放
+            btn.addEventListener('dblclick', (e) => e.preventDefault());
         });
+
+        // Canvas 区域触控 (直接点击轨道)
+        const canvas = document.getElementById('gameCanvas');
+        if (canvas) {
+            canvas.addEventListener('touchstart', (e) => {
+                if (gameState.screen !== 'game') return;
+                e.preventDefault();
+                for (const touch of e.changedTouches) {
+                    this._handleCanvasTouch(touch.clientX, touch.clientY, true);
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', (e) => {
+                if (gameState.screen !== 'game') return;
+                e.preventDefault();
+                for (const touch of e.changedTouches) {
+                    this._handleCanvasTouch(touch.clientX, touch.clientY, false);
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchcancel', (e) => {
+                if (gameState.screen !== 'game') return;
+                for (const touch of e.changedTouches) {
+                    this._handleCanvasTouch(touch.clientX, touch.clientY, false);
+                }
+            });
+        }
     }
 
-    // ========== 打击判定 ==========
+    /** 处理 Canvas 上的触控，映射到轨道 */
+    _handleCanvasTouch(clientX, clientY, isDown) {
+        if (!renderer) return;
+        const totalWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * CONFIG.trackSpacing;
+        const startX = renderer.trackStartX;
+        const endX = startX + totalWidth;
+
+        // 在轨道区域外 → 忽略
+        if (clientX < startX - 20 || clientX > endX + 20) return;
+
+        // 计算轨道索引
+        const relX = clientX - startX;
+        const trackWidth = CONFIG.trackWidth + CONFIG.trackSpacing;
+        const trackIndex = Math.floor(relX / trackWidth);
+        if (trackIndex < 0 || trackIndex >= CONFIG.trackCount) return;
+
+        const key = KEYS[trackIndex];
+
+        if (isDown && !gameState.pressedKeys.has(key)) {
+            gameState.pressedKeys.add(key);
+            this.checkHit(trackIndex);
+        } else if (!isDown) {
+            this.checkHoldRelease(trackIndex);
+            gameState.pressedKeys.delete(key);
+        }
+    }
+
+    // ========== 打击判定 (双阈值提前终止) ==========
     checkHit(track) {
         if (!renderer) return false;
 
         const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
         const currentTime = performance.now() - gameState.startTime;
 
-        // 倒计时期间不判定
         if (currentTime < 0) return false;
 
-        // 如果该轨道有一个在宽限期内的 hold，补按恢复（不算 miss）
+        // hold 宽限期补按
         if (gameState.holdReleaseTimes[track] > 0) {
-            const elapsed = currentTime - gameState.holdReleaseTimes[track];
-            if (elapsed <= 40) {
-                // 40ms 内补按 → 恢复 hold，不产生任何判定
+            if (currentTime - gameState.holdReleaseTimes[track] <= 40) {
                 gameState.holdReleaseTimes[track] = 0;
-                // hold 继续保持活跃（holdActive 未被清除，activeHolds 仍指向原 note）
                 return true;
             }
         }
 
-        for (let i = 0; i < gameState.notes.length; i++) {
-            const note = gameState.notes[i];
+        const notes = gameState.notes;
+        const noteCount = notes.length;
+        const greatWindow = CONFIG.greatWindow;
+        const perfectWindow = CONFIG.perfectWindow;
+        const activeHolds = gameState.activeHolds;
+        const pastDeadline = currentTime - greatWindow;
+        const futureDeadline = currentTime + greatWindow;
+
+        for (let i = 0; i < noteCount; i++) {
+            const note = notes[i];
+            const noteTime = note.time;
+
+            // 时间检查优先于轨道检查（音符按时间排序）
+            if (noteTime < pastDeadline) continue;   // 太旧，跳过
+            if (noteTime > futureDeadline) break;     // 太远，后续也都太远
+
+            // 轨道匹配 + 未命中
             if (note.track !== track || note.hit) continue;
 
-            const timeDiff = Math.abs(currentTime - note.time);
-            if (timeDiff > CONFIG.greatWindow) continue;
+            const timeDiff = Math.abs(currentTime - noteTime);
 
-            // ===== Hold 长条头部判定 =====
+            // ===== Hold 长条头部 =====
             if (note.type === 'hold' && note.endTime) {
                 note.hit = true;
                 note.holdActive = true;
-                const isPerfect = timeDiff <= CONFIG.perfectWindow;
-
-                // 注册为当前轨道的活跃 hold
-                gameState.activeHolds[track] = note;
+                const isPerfect = timeDiff <= perfectWindow;
+                activeHolds[track] = note;
 
                 if (isPerfect) {
                     gameState.perfect++;
@@ -911,16 +1058,15 @@ class UIManager {
 
                 gameState.combo++;
                 gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
-                gameState.health = Math.min(100, gameState.health + 2);
-
+                gameState.health = Math.min(CONFIG.health.initial, gameState.health + CONFIG.health.gainOnHit);
                 renderer.createHitParticles(judgmentY, track, isPerfect ? '#ffd43b' : '#69db7c');
                 renderer.createLaser(track);
                 return true;
             }
 
-            // ===== Tap 音符判定 =====
+            // ===== Tap 音符 =====
             note.hit = true;
-            const isPerfect = timeDiff <= CONFIG.perfectWindow;
+            const isPerfect = timeDiff <= perfectWindow;
 
             if (isPerfect) {
                 gameState.perfect++;
@@ -938,8 +1084,7 @@ class UIManager {
 
             gameState.combo++;
             gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
-            gameState.health = Math.min(100, gameState.health + 2);
-
+            gameState.health = Math.min(CONFIG.health.initial, gameState.health + CONFIG.health.gainOnHit);
             renderer.createHitParticles(judgmentY, track, isPerfect ? '#ffd43b' : '#69db7c');
             renderer.createLaser(track);
             return true;
@@ -999,9 +1144,8 @@ class UIManager {
                     gameState.miss++;
                     gameState.intervalStats.miss++;
                     gameState.combo = 0;
-                    gameState.health = Math.max(0, gameState.health - 10);
+                    gameState.health = Math.max(0, gameState.health - CONFIG.health.lossOnMiss);
                     renderer.addJudgment('MISS', judgmentY, track);
-                    renderer.createMissEffect(judgmentY, track);
                     audioEngine.playHitSound('miss');
                     continue;
                 }
@@ -1016,7 +1160,7 @@ class UIManager {
                 const holdDuration = holdNote.endTime - holdNote.time;
                 const holdBonus = Math.floor(holdDuration / 100) * 10;
                 gameState.score += 100 + holdBonus;
-                gameState.health = Math.min(100, gameState.health + 1);
+                gameState.health = Math.min(CONFIG.health.initial, gameState.health + 1);
 
                 const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
                 renderer.createLaser(track);
