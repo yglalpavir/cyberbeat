@@ -41,31 +41,52 @@
                 <div class="song-panel">
                     <div class="song-panel-header">
                         <span class="panel-title">MUSIC SELECT</span>
+                        <div class="panel-tabs">
+                            <button class="panel-tab active" data-tab="midi" id="tabMidi">MIDI</button>
+                            <button class="panel-tab" data-tab="songs" id="tabSongs">SONGS</button>
+                        </div>
                         <span class="panel-count" id="songCount">0 TRACKS</span>
                     </div>
                     
                     <div class="song-list-wrapper" id="songListWrapper">
-                        <div class="song-card import-card" id="importMidiCard">
-                            <div class="card-body">
-                                <div class="card-icon">📂</div>
-                                <div class="card-info">
-                                    <span class="card-title import-title">IMPORT MIDI</span>
-                                    <span class="card-sub">Load from device</span>
+                        <!-- MIDI Tab Content -->
+                        <div class="tab-content active" id="tabContentMidi">
+                            <div class="song-card import-card" id="importMidiCard">
+                                <div class="card-body">
+                                    <div class="card-icon">📂</div>
+                                    <div class="card-info">
+                                        <span class="card-title import-title">IMPORT MIDI</span>
+                                        <span class="card-sub">Load from device</span>
+                                    </div>
+                                    <div class="card-arrow">→</div>
                                 </div>
-                                <div class="card-arrow">→</div>
+                                <input type="file" id="midiUpload" accept=".mid" class="card-file-input">
                             </div>
-                            <input type="file" id="midiUpload" accept=".mid" class="card-file-input">
+                            
+                            <div class="song-divider">
+                                <span>MIDI LIBRARY</span>
+                            </div>
+                            
+                            <div class="song-cards" id="songCardsMidi"></div>
+                            <div class="song-empty" id="songEmptyMidi" style="display:none;">
+                                <span class="empty-icon">🎹</span>
+                                <span>No MIDI songs in library</span>
+                                <span class="empty-hint">Use import above</span>
+                            </div>
                         </div>
                         
-                        <div class="song-divider">
-                            <span>LIBRARY</span>
-                        </div>
-                        
-                        <div class="song-cards" id="songCards"></div>
-                        <div class="song-empty" id="songEmpty" style="display:none;">
-                            <span class="empty-icon">🎵</span>
-                            <span>No songs in library</span>
-                            <span class="empty-hint">Use import above</span>
+                        <!-- SONGS Tab Content -->
+                        <div class="tab-content" id="tabContentSongs">
+                            <div class="song-divider">
+                                <span>BEATMAP LIBRARY</span>
+                            </div>
+                            
+                            <div class="song-cards" id="songCardsSongs"></div>
+                            <div class="song-empty" id="songEmptySongs" style="display:none;">
+                                <span class="empty-icon">🎵</span>
+                                <span>No beatmap songs in library</span>
+                                <span class="empty-hint">Add .mc files to assets/songs/</span>
+                            </div>
                         </div>
                     </div>
                 </div>
