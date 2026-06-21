@@ -307,7 +307,6 @@ body {
     align-items: center;
     padding: 20px 20px 14px;
     border-bottom: 1px solid var(--border-subtle);
-    gap: 12px;
 }
 
 .panel-title {
@@ -315,59 +314,11 @@ body {
     font-weight: 700;
     color: var(--text-primary);
     letter-spacing: 1px;
-    white-space: nowrap;
-}
-
-/* ===== 标签页切换按钮 ===== */
-.panel-tabs {
-    display: flex;
-    gap: 2px;
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 6px;
-    padding: 2px;
-}
-
-.panel-tab {
-    padding: 5px 14px;
-    font-family: var(--font-family);
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    color: var(--text-tertiary);
-    background: transparent;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    outline: none;
-    white-space: nowrap;
-}
-
-.panel-tab:hover {
-    color: var(--text-secondary);
-    background: rgba(255, 255, 255, 0.04);
-}
-
-.panel-tab.active {
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-}
-
-/* ===== 标签页内容区域 ===== */
-.tab-content {
-    display: none;
-    flex-direction: column;
-}
-
-.tab-content.active {
-    display: flex;
 }
 
 .panel-count {
     font-size: 0.7rem;
     color: var(--text-tertiary);
-    white-space: nowrap;
 }
 
 .song-list-wrapper {

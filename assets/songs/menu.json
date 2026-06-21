@@ -2,38 +2,18 @@
   "version": "1.1",
   "songs": [
     {
-      "id": "m1001",
+      "id": "1",
       "file": "Last.mid",
       "title": "Last",
       "artist": "onoken",
       "preview": null,
       "difficulties": [
         { "key": "normal",  "name": "NORMAL", "level": 7 },
-        { "key": "normal+", "name": "NORMAL+",   "level": 28 }
+        { "key": "normal+", "name": "HARD",   "level": 28 }
       ]
     },
     {
-      "id": "m1002",
-      "file": "Abiogenesis.mid",
-      "title": "Abiogenesis",
-      "artist": "Juggernaut.",
-      "preview": null,
-      "difficulties": [
-        { "key": "normal+", "name": "NORMAL+",   "level": 20 }
-      ]
-    },
-    {
-      "id": "m1003",
-      "file": "Nhelv.mid",
-      "title": "Nhelv",
-      "artist": "Silentroom",
-      "preview": null,
-      "difficulties": [
-        { "key": "normal+", "name": "NORMAL+",   "level": 33 }
-      ]
-    },
-    {
-      "id": "c1001",
+      "id": "2",
       "audio": "Adjudicatorz-断罪-.ogg",
       "beatmap": "Adjudicatorz-断罪-.mc",
       "beatmapType": "mc",
@@ -44,7 +24,7 @@
       "difficultyName": "NORMAL"
     },
     {
-      "id": "c1002",
+      "id": "3",
       "audio": "Haikyo,_Kikai_and_Shizen.ogg",
       "beatmap": "Haikyo,_Kikai_and_Shizen.mc",
       "beatmapType": "mc",
@@ -55,7 +35,7 @@
       "difficultyName": "HARD"
     },
     {
-      "id": "c1003",
+      "id": "4",
       "audio": "the_world_of_scarlet.ogg",
       "beatmap": "the_world_of_scarlet.mc",
       "beatmapType": "mc",
@@ -66,7 +46,7 @@
       "difficultyName": "NORMAL"
     },
     {
-      "id": "c1004",
+      "id": "5",
       "audio": "Regular-5.ogg",
       "beatmap": "Regular-5.mc",
       "beatmapType": "mc",
