@@ -27,10 +27,19 @@ class UIManager {
         this.selectedSongName   = document.getElementById('selectedSongName');
         this.selectedSongSourceEl = document.getElementById('selectedSongSource');
 
-        // 曲库
-        this.songCards  = document.getElementById('songCards');
-        this.songEmpty  = document.getElementById('songEmpty');
-        this.songCount  = document.getElementById('songCount');
+        // 曲库（分 MIDI / SONGS 两个标签页）
+        this.songCardsMidi  = document.getElementById('songCardsMidi');
+        this.songCardsSongs = document.getElementById('songCardsSongs');
+        this.songEmptyMidi  = document.getElementById('songEmptyMidi');
+        this.songEmptySongs = document.getElementById('songEmptySongs');
+        this.songCount      = document.getElementById('songCount');
+
+        // 标签页
+        this.tabMidi        = document.getElementById('tabMidi');
+        this.tabSongs       = document.getElementById('tabSongs');
+        this.tabContentMidi = document.getElementById('tabContentMidi');
+        this.tabContentSongs= document.getElementById('tabContentSongs');
+        this.activeTab      = 'midi';  // 当前活跃标签页
 
         // 导入
         this.importMidiCard = document.getElementById('importMidiCard');
@@ -111,6 +120,10 @@ class UIManager {
             });
         });
 
+        // 标签页切换
+        this.tabMidi.addEventListener('click', () => this.switchTab('midi'));
+        this.tabSongs.addEventListener('click', () => this.switchTab('songs'));
+
         // 导入 MIDI 卡片点击 → 触发 file input
         this.importMidiCard.addEventListener('click', (e) => {
             if (e.target !== this.midiUpload) {
@@ -153,23 +166,96 @@ class UIManager {
         }
     }
 
+    /**
+     * 从 songLibrary 中筛选 MIDI 歌曲（beatmapType 不是 "mc" 的，包括 .mid）
+     */
+    _getMidiSongs() {
+        return songLibrary.filter(s => !s.beatmapType || s.beatmapType !== 'mc');
+    }
+
+    /**
+     * 从 songLibrary 中筛选 MC 谱面歌曲（beatmapType === 'mc'）
+     */
+    _getMcSongs() {
+        return songLibrary.filter(s => s.beatmapType === 'mc');
+    }
+
     renderSongList() {
-        if (!this.songCards) return;
+        if (!this.songCardsMidi || !this.songCardsSongs) return;
 
-        this.songCount.textContent = `${songLibrary.length} TRACKS`;
-        this.songCards.innerHTML = '';
+        const midiSongs = this._getMidiSongs();
+        const mcSongs = this._getMcSongs();
 
-        if (songLibrary.length === 0) {
-            if (this.songEmpty) this.songEmpty.style.display = 'flex';
+        // 更新计数（显示当前活跃标签页的曲目数）
+        this._updateTabCount();
+
+        // --- MIDI 标签页 ---
+        this.songCardsMidi.innerHTML = '';
+        if (midiSongs.length === 0) {
+            if (this.songEmptyMidi) this.songEmptyMidi.style.display = 'flex';
         } else {
-            if (this.songEmpty) this.songEmpty.style.display = 'none';
-            songLibrary.forEach((song, index) => {
-                const card = this.createSongCard(song, index);
-                this.songCards.appendChild(card);
+            if (this.songEmptyMidi) this.songEmptyMidi.style.display = 'none';
+            midiSongs.forEach((song) => {
+                const realIndex = songLibrary.indexOf(song);
+                const card = this.createSongCard(song, realIndex);
+                this.songCardsMidi.appendChild(card);
+            });
+        }
+
+        // --- SONGS 标签页 ---
+        this.songCardsSongs.innerHTML = '';
+        if (mcSongs.length === 0) {
+            if (this.songEmptySongs) this.songEmptySongs.style.display = 'flex';
+        } else {
+            if (this.songEmptySongs) this.songEmptySongs.style.display = 'none';
+            mcSongs.forEach((song) => {
+                const realIndex = songLibrary.indexOf(song);
+                const card = this.createSongCard(song, realIndex);
+                this.songCardsSongs.appendChild(card);
             });
         }
 
         this.updateAllHighlights();
+    }
+
+    /**
+     * 切换标签页
+     */
+    switchTab(tab) {
+        if (this.activeTab === tab) return;
+        this.activeTab = tab;
+
+        // 更新标签按钮状态
+        this.tabMidi.classList.toggle('active', tab === 'midi');
+        this.tabSongs.classList.toggle('active', tab === 'songs');
+
+        // 切换内容区域
+        this.tabContentMidi.classList.toggle('active', tab === 'midi');
+        this.tabContentSongs.classList.toggle('active', tab === 'songs');
+
+        // 更新计数
+        this._updateTabCount();
+
+        // 如果当前选中的歌曲不在活跃标签页中，清除选中
+        if (selectedSongSource === 'library' && selectedLibrarySong) {
+            const isMcSelected = selectedLibrarySong.beatmapType === 'mc';
+            if ((tab === 'midi' && isMcSelected) || (tab === 'songs' && !isMcSelected)) {
+                this.clearSelection();
+            }
+        }
+        if (selectedSongSource === 'import' && tab === 'songs') {
+            this.clearSelection();
+        }
+    }
+
+    /**
+     * 更新标签页曲目计数
+     */
+    _updateTabCount() {
+        const midiSongs = this._getMidiSongs();
+        const mcSongs = this._getMcSongs();
+        const count = this.activeTab === 'midi' ? midiSongs.length : mcSongs.length;
+        this.songCount.textContent = `${count} TRACKS`;
     }
 
     createSongCard(song, index) {
@@ -348,12 +434,12 @@ class UIManager {
     }
 
     updateAllHighlights() {
-        // 导入卡片
+        // 导入卡片（仅在 MIDI 标签页）
         this.importMidiCard.classList.toggle('selected', selectedSongSource === 'import');
 
-        // 曲库卡片
-        const cards = this.songCards.querySelectorAll('.song-card');
-        cards.forEach(card => {
+        // 曲库卡片（两个标签页都更新）
+        const allSongCards = document.querySelectorAll('.song-cards .song-card');
+        allSongCards.forEach(card => {
             const idx = parseInt(card.dataset.songIndex);
             const isSelected = selectedSongSource === 'library' &&
                 selectedLibrarySong &&
