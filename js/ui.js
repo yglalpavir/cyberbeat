@@ -4,16 +4,29 @@ class UIManager {
     constructor() {
         this.songLibraryLoaded = false;
 
+        // 排行榜详情状态
+        this._detailSongName = null;
+        this._detailRecordId = null;
+        this._pendingChartHistory = null;
+
+        // 应用持久化设置到运行时变量
+        if (typeof settingsStore !== 'undefined') {
+            settingsStore.applyToRuntime();
+        }
+
         this.cacheDOMElements();
         this.setupEventListeners();
         this.loadSongLibrary();
         this.updateSpeedDisplay();
         this.updateStartButtons();
 
-        // 初始化音量（0-10）
-        this.setVolume(CONFIG.defaultVolume);
-        if (this.volumeSlider) this.volumeSlider.value = CONFIG.defaultVolume;
-        if (this.volumeValue) this.volumeValue.textContent = CONFIG.defaultVolume + '/10';
+        // 用持久化的设置覆盖 UI 初始状态
+        this.applyStoredSettingsToUI();
+
+        // 初始化音量（0-10）- 使用持久化的音量
+        this.setVolume(currentVolume);
+        if (this.volumeSlider) this.volumeSlider.value = currentVolume;
+        if (this.volumeValue) this.volumeValue.textContent = currentVolume + '/10';
     }
 
     // ========== DOM 缓存 ==========
@@ -52,6 +65,7 @@ class UIManager {
         this.settingsBackBtn  = document.getElementById('settingsBackBtn');
         this.homeBtn          = document.getElementById('homeBtn');
         this.exportBtn        = document.getElementById('exportBtn');
+        this.leaderboardStartBtn = document.getElementById('leaderboardStartBtn');
 
         // 设置面板
         this.settingsSongTitle  = document.getElementById('settingsSongTitle');
@@ -72,6 +86,28 @@ class UIManager {
         this.finalPerfect   = document.getElementById('finalPerfect');
         this.finalGreat     = document.getElementById('finalGreat');
         this.finalMiss      = document.getElementById('finalMiss');
+
+        // 结果面板 - 新按钮
+        this.retryBtn       = document.getElementById('retryBtn');
+        this.leaderboardBtn = document.getElementById('leaderboardBtn');
+
+        // 排行榜面板
+        this.leaderboardScreen = document.getElementById('leaderboardScreen');
+        this.lbSongFilter      = document.getElementById('lbSongFilter');
+        this.lbList            = document.getElementById('lbList');
+        this.lbDetail          = document.getElementById('lbDetail');
+        this.lbDetailTitle     = document.getElementById('lbDetailTitle');
+        this.lbDetailStats     = document.getElementById('lbDetailStats');
+        this.lbChartCanvas     = document.getElementById('lbChartCanvas');
+
+        // 排行榜操作按钮
+        this.lbCloseBtn       = document.getElementById('lbCloseBtn');
+        this.lbBackBtn        = document.getElementById('lbBackBtn');
+        this.lbExportAllBtn   = document.getElementById('lbExportAllBtn');
+        this.lbImportBtn      = document.getElementById('lbImportBtn');
+        this.lbImportFile     = document.getElementById('lbImportFile');
+        this.lbDetailClose    = document.getElementById('lbDetailClose');
+        this.lbDetailDelete   = document.getElementById('lbDetailDelete');
     }
 
     // ========== 事件绑定 ==========
@@ -80,6 +116,11 @@ class UIManager {
         this.startBtn.addEventListener('click', () => this.handleStartOrConfig());
         this.settingsBtn.addEventListener('click', () => this.handleStartOrConfig());
 
+        // 开始画面的排行榜按钮
+        if (this.leaderboardStartBtn) {
+            this.leaderboardStartBtn.addEventListener('click', () => this.showLeaderboard(false));
+        }
+
         // 设置面板内按钮
         this.settingsStartBtn.addEventListener('click', () => this.startGame());
         this.settingsBackBtn.addEventListener('click', () => this.hideSettings());
@@ -87,6 +128,17 @@ class UIManager {
         // 结果面板
         this.homeBtn.addEventListener('click', () => this.goToHome());
         this.exportBtn.addEventListener('click', () => this.exportResults());
+
+        // 结果面板 - 新按钮
+        if (this.retryBtn) {
+            this.retryBtn.addEventListener('click', () => this.retryGame());
+        }
+        if (this.leaderboardBtn) {
+            this.leaderboardBtn.addEventListener('click', () => this.showLeaderboard());
+        }
+
+        // 排行榜面板事件
+        this._setupLeaderboardEvents();
 
         // 速度
         const speedUpBtn = document.getElementById('speedUp');
@@ -791,7 +843,7 @@ class UIManager {
         const statusText = document.getElementById('statusText');
 
         // 更新排名显示
-        rankDisplay.textContent = rank;
+        rankDisplay.textContent = isGameFailed ? 'F' : rank;
         rankDisplay.className = 'rank';
         
         // 根据状态更新 UI 样式
@@ -821,9 +873,38 @@ class UIManager {
         }
 
         this.resultScreen.classList.remove('hidden');
-        
+
+        // 保存游玩记录到本地排行榜
+        this._saveToLeaderboard(accuracy, rank, isGameFailed);
+
         // 播放结算音乐
         this.playResultAudio(isGameFailed);
+    }
+
+    // ========== 保存记录到排行榜 ==========
+    _saveToLeaderboard(accuracy, rank, isGameFailed) {
+        if (typeof leaderboard === 'undefined') return;
+
+        try {
+            leaderboard.addRecord({
+                songName: selectedSongDisplayName || 'Unknown',
+                date: new Date().toISOString(),
+                score: gameState.score,
+                accuracy: accuracy,
+                maxCombo: gameState.maxCombo,
+                perfect: gameState.perfect,
+                great: gameState.great,
+                miss: gameState.miss,
+                rank: isGameFailed ? 'F' : rank,
+                difficulty: selectedDifficulty,
+                speed: noteSpeed,
+                style: noteStyle,
+                isFailed: isGameFailed,
+                performanceHistory: gameState.performanceHistory
+            });
+        } catch (e) {
+            console.warn('Failed to save leaderboard record:', e);
+        }
     }
 
     // 根据等级返回标签文本
@@ -852,43 +933,102 @@ class UIManager {
     }
 
     goToHome() {
-        window.location.reload();
+        // 停止所有音频
+        audioEngine.stopMusic();
+        // 重置游戏状态
+        gameState.reset();
+        // 重置渲染器对象池
+        if (renderer) renderer.resetPools();
+        // 隐藏结果和排行榜画面
+        this.resultScreen.classList.add('hidden');
+        if (this.leaderboardScreen) this.leaderboardScreen.classList.add('hidden');
+        // 显示开始画面
+        this.startScreen.classList.remove('hidden');
+        // 重新渲染开始画面
+        _lastFrameTime = performance.now();
+        requestAnimationFrame(renderStartScreen);
     }
 
-    // ========== 成绩导出 ==========
+    // ========== 重新游玩 ==========
+    retryGame() {
+        // 隐藏结果画面
+        this.resultScreen.classList.add('hidden');
+        // 直接重新开始当前歌曲
+        this.startGame();
+    }
+
+    // ========== 持久化设置应用到 UI ==========
+    applyStoredSettingsToUI() {
+        if (typeof settingsStore === 'undefined') return;
+
+        const s = settingsStore.load();
+
+        // 应用速度
+        if (s.noteSpeed !== undefined) {
+            noteSpeed = s.noteSpeed;
+            this.updateSpeedDisplay();
+        }
+
+        // 应用难度
+        if (s.difficulty !== undefined) {
+            selectedDifficulty = s.difficulty;
+            document.querySelectorAll('.diff-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.diff === s.difficulty);
+            });
+        }
+
+        // 应用样式
+        if (s.noteStyle !== undefined) {
+            noteStyle = s.noteStyle;
+            document.querySelectorAll('.style-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.style === s.noteStyle);
+            });
+        }
+    }
+
+    // ========== 设置变更时同步持久化 ==========
+    _syncSettingsToStore() {
+        if (typeof settingsStore !== 'undefined') {
+            settingsStore.syncFromRuntime();
+        }
+    }
+
+    // ========== 成绩导出 (JSON) ==========
     exportResults() {
         const accuracy = gameState.calculateTotalAcc();
         let rank = 'C';
         if (accuracy >= 95 && gameState.miss === 0) rank = 'S';
         else if (accuracy >= 85) rank = 'A';
         else if (accuracy >= 70) rank = 'B';
+        if (gameState.health <= 0) rank = 'F';
 
         const now = new Date();
-        let content = "============================\n";
-        content += "      CYBER BEAT RESULT\n";
-        content += "============================\n\n";
-        content += `DATE: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}\n`;
-        content += `SONG: ${selectedSongDisplayName || 'Unknown'}\n`;
-        content += `DIFFICULTY: ${selectedDifficulty.toUpperCase()}\n`;
-        content += `STYLE: ${noteStyle.toUpperCase()}\n`;
-        content += `SPEED: ${noteSpeed.toFixed(1)}\n\n`;
-        content += "----------------------------\n";
-        content += "SCORE:      " + gameState.score.toLocaleString() + "\n";
-        content += "MAX COMBO:  " + gameState.maxCombo + "\n";
-        content += "ACCURACY:   " + accuracy.toFixed(2) + "%\n";
-        content += "RANK:       " + rank + "\n\n";
-        content += "PERFECT:    " + gameState.perfect + "\n";
-        content += "GREAT:      " + gameState.great + "\n";
-        content += "MISS:       " + gameState.miss + "\n";
-        content += "============================\n";
-        content += "      THANKS FOR PLAYING\n";
-        content += "============================\n";
+        const record = {
+            version: 1,
+            exportedAt: now.toISOString(),
+            playerName: typeof leaderboard !== 'undefined' ? leaderboard.getPlayerName() : 'Local',
+            songName: selectedSongDisplayName || 'Unknown',
+            date: now.toISOString(),
+            score: gameState.score,
+            accuracy: accuracy,
+            maxCombo: gameState.maxCombo,
+            perfect: gameState.perfect,
+            great: gameState.great,
+            miss: gameState.miss,
+            rank: rank,
+            difficulty: selectedDifficulty,
+            speed: noteSpeed,
+            style: noteStyle,
+            isFailed: gameState.health <= 0,
+            performanceHistory: gameState.performanceHistory
+        };
 
-        const blob = new Blob([content], { type: 'text/plain' });
+        const jsonStr = JSON.stringify(record, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `CyberBeat_Result_${now.getTime()}.txt`;
+        a.download = `CyberBeat_Result_${now.getTime()}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -901,6 +1041,7 @@ class UIManager {
         noteSpeed = Math.round(noteSpeed * 10) / 10;
         noteSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, noteSpeed));
         this.updateSpeedDisplay();
+        this._syncSettingsToStore();
     }
 
     setDifficulty(diff) {
@@ -908,6 +1049,7 @@ class UIManager {
         document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
         const btn = document.querySelector(`.diff-btn[data-diff="${diff}"]`);
         if (btn) btn.classList.add('active');
+        this._syncSettingsToStore();
     }
 
     setNoteStyle(style) {
@@ -918,6 +1060,8 @@ class UIManager {
         document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
         const btn = document.querySelector(`.style-btn[data-style="${style}"]`);
         if (btn) btn.classList.add('active');
+
+        this._syncSettingsToStore();
     }
 
     updateSpeedDisplay() {
@@ -938,15 +1082,24 @@ class UIManager {
         if (this.volumeValue) {
             this.volumeValue.textContent = currentVolume + '/10';
         }
+
+        this._syncSettingsToStore();
     }
 
     // ========== 键盘控制 ==========
     setupKeyboardControls() {
         document.addEventListener('keydown', (e) => {
             // 忽略在输入框内的按键
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
             const key = e.key.toLowerCase();
+
+            // Escape: 关闭排行榜
+            if (key === 'escape' && this.leaderboardScreen && !this.leaderboardScreen.classList.contains('hidden')) {
+                e.preventDefault();
+                this.hideLeaderboard();
+                return;
+            }
 
             // 开始画面按 Enter
             if (gameState.screen === 'start' && key === 'enter') {
@@ -1176,6 +1329,574 @@ class UIManager {
             return true;
         }
         return false;
+    }
+
+    // ========== 排行榜 UI ==========
+
+    /** 设置排行榜相关事件监听 */
+    _setupLeaderboardEvents() {
+        // 关闭按钮
+        if (this.lbCloseBtn) {
+            this.lbCloseBtn.addEventListener('click', () => this.hideLeaderboard());
+        }
+        if (this.lbBackBtn) {
+            this.lbBackBtn.addEventListener('click', () => this.hideLeaderboard());
+        }
+
+        // 歌曲筛选
+        if (this.lbSongFilter) {
+            this.lbSongFilter.addEventListener('change', () => this._renderLeaderboardList());
+        }
+
+        // 排序按钮
+        document.querySelectorAll('.lb-sort-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.lb-sort-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this._renderLeaderboardList();
+            });
+        });
+
+        // 导出全部
+        if (this.lbExportAllBtn) {
+            this.lbExportAllBtn.addEventListener('click', () => this._exportAllRecords());
+        }
+
+        // 导入
+        if (this.lbImportBtn && this.lbImportFile) {
+            this.lbImportBtn.addEventListener('click', () => this.lbImportFile.click());
+            this.lbImportFile.addEventListener('change', (e) => this._importRecords(e));
+        }
+
+        // 详情关闭
+        if (this.lbDetailClose) {
+            this.lbDetailClose.addEventListener('click', () => {
+                if (this.lbDetail) this.lbDetail.style.display = 'none';
+            });
+        }
+
+        // 详情删除
+        if (this.lbDetailDelete) {
+            this.lbDetailDelete.addEventListener('click', () => this._deleteDetailedRecord());
+        }
+    }
+
+    /** 显示排行榜 */
+    showLeaderboard(fromResult = true) {
+        if (typeof leaderboard === 'undefined') {
+            alert('Leaderboard system not available.');
+            return;
+        }
+
+        // 根据来源隐藏对应画面
+        if (fromResult && this.resultScreen) {
+            this.resultScreen.classList.add('hidden');
+        } else if (!fromResult && this.startScreen) {
+            this.startScreen.classList.add('hidden');
+        }
+
+        this._populateSongFilter();
+        this._renderLeaderboardList();
+
+        // 隐藏详情面板
+        if (this.lbDetail) this.lbDetail.style.display = 'none';
+
+        if (this.leaderboardScreen) {
+            this.leaderboardScreen.classList.remove('hidden');
+        }
+    }
+
+    /** 隐藏排行榜 */
+    hideLeaderboard() {
+        if (this.leaderboardScreen) {
+            this.leaderboardScreen.classList.add('hidden');
+        }
+        // 重置游戏状态，确保可以正常渲染开始画面
+        gameState.reset();
+        if (renderer) renderer.resetPools();
+        // 返回开始画面
+        this.startScreen.classList.remove('hidden');
+        _lastFrameTime = performance.now();
+        requestAnimationFrame(renderStartScreen);
+    }
+
+    /** 填充歌曲筛选下拉框 */
+    _populateSongFilter() {
+        if (!this.lbSongFilter) return;
+
+        const summaries = leaderboard.getAllSongSummaries();
+        const currentValue = this.lbSongFilter.value;
+
+        this.lbSongFilter.innerHTML = '<option value="__all__">All Songs</option>';
+
+        summaries.forEach(s => {
+            const option = document.createElement('option');
+            option.value = s.songName;
+            option.textContent = `${s.songName} (${s.recordCount})`;
+            this.lbSongFilter.appendChild(option);
+        });
+
+        // 恢复之前的选择
+        if (currentValue && [...this.lbSongFilter.options].some(o => o.value === currentValue)) {
+            this.lbSongFilter.value = currentValue;
+        }
+    }
+
+    /** 获取当前排序方式 */
+    _getCurrentSortBy() {
+        const activeBtn = document.querySelector('.lb-sort-btn.active');
+        return activeBtn ? activeBtn.dataset.sort : 'date';
+    }
+
+    /** 渲染排行榜列表 */
+    _renderLeaderboardList() {
+        if (!this.lbList) return;
+
+        const songFilter = this.lbSongFilter ? this.lbSongFilter.value : '__all__';
+        const sortBy = this._getCurrentSortBy();
+        let records = [];
+
+        if (songFilter === '__all__') {
+            // 显示所有歌曲的记录
+            const summaries = leaderboard.getAllSongSummaries();
+            for (const summary of summaries) {
+                const songRecords = leaderboard.getRecords(summary.songName, sortBy);
+                records = records.concat(songRecords);
+            }
+            // 重新按全局排序
+            switch (sortBy) {
+                case 'score':
+                    records.sort((a, b) => b.score - a.score);
+                    break;
+                case 'accuracy':
+                    records.sort((a, b) => b.accuracy - a.accuracy);
+                    break;
+                case 'date':
+                default:
+                    records.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    break;
+            }
+        } else {
+            records = leaderboard.getRecords(songFilter, sortBy);
+        }
+
+        if (records.length === 0) {
+            this.lbList.innerHTML = `
+                <div class="lb-empty">
+                    <span class="lb-empty-icon">📭</span>
+                    <span>No records yet</span>
+                    <span class="lb-empty-hint">Play a song to record your score!</span>
+                </div>`;
+            return;
+        }
+
+        let html = '';
+        records.forEach((r, i) => {
+            const dateStr = new Date(r.date).toLocaleDateString();
+            const timeStr = new Date(r.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const rankClass = this._getRecordRankClass(r.rank);
+
+            // 排名标记
+            let rankIcon = '';
+            if (sortBy === 'score' || sortBy === 'accuracy') {
+                if (i === 0) rankIcon = '<span class="lb-record-rank top1">🥇</span>';
+                else if (i === 1) rankIcon = '<span class="lb-record-rank top2">🥈</span>';
+                else if (i === 2) rankIcon = '<span class="lb-record-rank top3">🥉</span>';
+                else rankIcon = `<span class="lb-record-rank">${i + 1}</span>`;
+            } else {
+                rankIcon = `<span class="lb-record-rank">${i + 1}</span>`;
+            }
+
+            html += `
+                <div class="lb-record" data-record-id="${r.id}" data-song="${this._escapeAttr(r.songName)}">
+                    ${rankIcon}
+                    <div class="lb-record-info">
+                        <span class="lb-record-name">${this.escapeHTML(r.songName)}</span>
+                        <span class="lb-record-meta">${r.playerName} · ${r.difficulty.toUpperCase()} · ${r.speed.toFixed(1)}x · ${dateStr} ${timeStr}</span>
+                    </div>
+                    <div class="lb-record-stats">
+                        <span class="lb-record-score">${r.score.toLocaleString()}</span>
+                        <span class="lb-record-acc">${r.accuracy.toFixed(2)}%</span>
+                    </div>
+                    <span class="lb-record-rank-badge ${rankClass}">${r.rank}</span>
+                </div>`;
+        });
+
+        this.lbList.innerHTML = html;
+
+        // 绑定点击事件以展开详情
+        this.lbList.querySelectorAll('.lb-record').forEach(recordEl => {
+            recordEl.addEventListener('click', () => {
+                const recordId = recordEl.dataset.recordId;
+                const songName = recordEl.dataset.song;
+                this._showRecordDetail(songName, recordId);
+            });
+        });
+    }
+
+    /** 显示记录详情（含折线图） */
+    _showRecordDetail(songName, recordId) {
+        if (!this.lbDetail) return;
+
+        const records = leaderboard.getRecords(songName, 'date');
+        const record = records.find(r => r.id === recordId);
+        if (!record) return;
+
+        // 更新标题
+        if (this.lbDetailTitle) {
+            const dateStr = new Date(record.date).toLocaleString();
+            this.lbDetailTitle.textContent = `${record.songName} - ${dateStr}`;
+        }
+
+        // 更新统计信息
+        if (this.lbDetailStats) {
+            this.lbDetailStats.innerHTML = `
+                <div class="stat-mini">
+                    <span class="stat-mini-label">SCORE</span>
+                    <span class="stat-mini-value">${record.score.toLocaleString()}</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-label">ACC</span>
+                    <span class="stat-mini-value">${record.accuracy.toFixed(2)}%</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-label">MAX COMBO</span>
+                    <span class="stat-mini-value">${record.maxCombo}</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-label">RANK</span>
+                    <span class="stat-mini-value" style="color:${this._getRankColor(record.rank)}">${record.rank}</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-label">PERFECT</span>
+                    <span class="stat-mini-value" style="color:#ffd43b">${record.perfect}</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-label">GREAT</span>
+                    <span class="stat-mini-value" style="color:#69db7c">${record.great}</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-label">MISS</span>
+                    <span class="stat-mini-value" style="color:#ff6b6b">${record.miss}</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="stat-mini-label">SPEED</span>
+                    <span class="stat-mini-value">${record.speed.toFixed(1)}x</span>
+                </div>
+            `;
+        }
+
+        // 存储当前查看的记录信息
+        this._detailSongName = songName;
+        this._detailRecordId = recordId;
+        // 同时存下 history 引用，便于在布局完成后绘制图表
+        this._pendingChartHistory = (record.performanceHistory && record.performanceHistory.length > 0)
+            ? record.performanceHistory : null;
+
+        // 关键：先让详情面板可见，浏览器完成布局后再绘制折线图
+        this.lbDetail.style.display = 'flex';
+
+        // 延迟一帧等待布局计算完成，确保 canvas 父容器有正确的尺寸
+        requestAnimationFrame(() => {
+            if (this._pendingChartHistory) {
+                this._drawDetailChart(this._pendingChartHistory);
+            } else if (this.lbChartCanvas) {
+                const parent = this.lbChartCanvas.parentElement;
+                const w = parent ? parent.clientWidth : 300;
+                const h = parent ? parent.clientHeight : 140;
+                this.lbChartCanvas.width = w;
+                this.lbChartCanvas.height = h;
+                const ctx = this.lbChartCanvas.getContext('2d');
+                ctx.clearRect(0, 0, w, h);
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('No performance data', w / 2, h / 2);
+            }
+            this._pendingChartHistory = null;
+        });
+    }
+
+    /** 绘制详情折线图（对齐 renderer.drawLineChart 的实现） */
+    _drawDetailChart(history) {
+        if (!this.lbChartCanvas) return;
+
+        const canvas = this.lbChartCanvas;
+        const parent = canvas.parentElement;
+        if (!parent) return;
+
+        // 使用 clientWidth/clientHeight 获取 CSS 布局尺寸（与 renderer 版本一致）
+        const w = parent.clientWidth;
+        const h = parent.clientHeight;
+        if (w <= 0 || h <= 0) return;
+
+        canvas.width = w;
+        canvas.height = h;
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+
+        if (!history || history.length === 0) return;
+
+        const leftMargin = 40, topMargin = 18, bottomMargin = 22, rightMargin = 14;
+        const chartW = w - leftMargin - rightMargin;
+        const chartH = h - topMargin - bottomMargin;
+
+        if (chartW <= 0 || chartH <= 0) return;
+
+        // 背景
+        ctx.fillStyle = 'rgba(255,255,255,0.02)';
+        ctx.fillRect(0, 0, w, h);
+
+        // ---- 动态 Y 轴范围 ----
+        let minAcc = 100, maxAcc = 0;
+        for (let i = 0; i < history.length; i++) {
+            const acc = history[i].totalAcc;
+            if (acc < minAcc) minAcc = acc;
+            if (acc > maxAcc) maxAcc = acc;
+        }
+
+        // 如果所有值相同，给它一点呼吸空间
+        if (minAcc === maxAcc) {
+            minAcc = Math.max(0, minAcc - 10);
+            maxAcc = Math.min(100, maxAcc + 10);
+        }
+
+        const range = maxAcc - minAcc;
+        const padding = range * 0.1;
+        const yMin = Math.max(0, minAcc - padding);
+        const yMax = Math.min(100, maxAcc + padding);
+        const yRange = yMax - yMin;
+
+        // ---- Y 轴刻度和网格 ----
+        const yTicks = this._generateYTicks(yMin, yMax);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+
+        for (let i = 0; i < yTicks.length; i++) {
+            const yPos = topMargin + chartH - (chartH * (yTicks[i] - yMin) / yRange);
+            ctx.fillText(yTicks[i].toFixed(0) + '%', leftMargin - 5, yPos);
+        }
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < yTicks.length; i++) {
+            const yPos = topMargin + chartH - (chartH * (yTicks[i] - yMin) / yRange);
+            ctx.beginPath();
+            ctx.moveTo(leftMargin, yPos);
+            ctx.lineTo(leftMargin + chartW, yPos);
+            ctx.stroke();
+        }
+
+        // ---- X 轴标签 ----
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = '8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        const totalDuration = history[history.length - 1].time;
+        const xSteps = Math.min(5, history.length);
+        for (let i = 0; i <= xSteps; i++) {
+            const fraction = xSteps > 0 ? i / xSteps : 0;
+            const x = leftMargin + chartW * fraction;
+            const sec = Math.round((totalDuration / 1000) * fraction);
+            ctx.fillText(sec + 's', x, topMargin + chartH + 6);
+        }
+
+        // ---- 折线 ----
+        const pointSpacing = history.length > 1 ? chartW / (history.length - 1) : 0;
+
+        ctx.strokeStyle = '#4dabf7';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < history.length; i++) {
+            const x = leftMargin + i * pointSpacing;
+            const normAcc = (history[i].totalAcc - yMin) / yRange;
+            const y = topMargin + chartH - (chartH * normAcc);
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        ctx.stroke();
+
+        // ---- 数据点 ----
+        ctx.fillStyle = '#4dabf7';
+        for (let i = 0; i < history.length; i++) {
+            const x = leftMargin + i * pointSpacing;
+            const normAcc = (history[i].totalAcc - yMin) / yRange;
+            const y = topMargin + chartH - (chartH * normAcc);
+            ctx.beginPath();
+            ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    /** 生成 Y 轴刻度（与 renderer._generateYTicks 一致） */
+    _generateYTicks(min, max) {
+        const range = max - min;
+        let interval = 10;
+        if (range <= 10) interval = 2;
+        else if (range <= 20) interval = 5;
+        else if (range <= 50) interval = 10;
+        else if (range <= 100) interval = 20;
+
+        const ticks = [];
+        const start = Math.ceil(min / interval) * interval;
+        const end = Math.floor(max / interval) * interval;
+        for (let i = start; i <= end; i += interval) {
+            if (i >= min && i <= max) ticks.push(i);
+        }
+        if (ticks.length < 3) {
+            ticks.push(Math.round(min));
+            ticks.push(Math.round(max));
+            ticks.sort((a, b) => a - b);
+        }
+        return [...new Set(ticks)];
+    }
+
+    /** 删除当前查看的记录（多重防护） */
+    _deleteDetailedRecord() {
+        if (!this._detailSongName || !this._detailRecordId) return;
+
+        // 防护 1：确认弹窗 - 明确告知不可撤销
+        const recordDate = this.lbDetailTitle
+            ? this.lbDetailTitle.textContent.replace(/^.* - /, '')
+            : 'this record';
+        const warnMsg = [
+            '⚠ WARNING: This action cannot be undone!',
+            '',
+            `You are about to permanently delete:`,
+            `  Song: ${this._detailSongName}`,
+            `  Date: ${recordDate}`,
+            '',
+            'This record will be removed from your local leaderboard forever.',
+            '',
+            'Are you sure you want to continue?'
+        ].join('\n');
+
+        if (!confirm(warnMsg)) return;
+
+        // 防护 2：二次确认 - 要求明确输入 DELETE 才执行
+        const secondMsg = [
+            '🔴 FINAL CONFIRMATION',
+            '',
+            'This is your last chance to cancel.',
+            'The record will be permanently erased.',
+            '',
+            'Type "DELETE" (all caps) in the box below to confirm.'
+        ].join('\n');
+
+        const userInput = prompt(secondMsg, '');
+        if (userInput !== 'DELETE') {
+            if (userInput !== null) {
+                alert('❌ Deletion cancelled.\nYou must type "DELETE" exactly to confirm.');
+            }
+            return;
+        }
+
+        // 防护 3：执行删除前短暂高亮警示（视觉反馈）
+        if (this.lbDetail) {
+            this.lbDetail.style.transition = 'box-shadow 0.15s ease';
+            this.lbDetail.style.boxShadow = 'inset 0 0 40px rgba(255, 107, 107, 0.5)';
+        }
+
+        // 实际删除
+        const deleted = leaderboard.deleteRecord(this._detailSongName, this._detailRecordId);
+
+        // 清除高亮
+        setTimeout(() => {
+            if (this.lbDetail) {
+                this.lbDetail.style.boxShadow = '';
+                this.lbDetail.style.transition = '';
+            }
+        }, 300);
+
+        if (deleted) {
+            // 清除当前详情引用
+            this._detailSongName = null;
+            this._detailRecordId = null;
+
+            // 隐藏详情面板
+            if (this.lbDetail) this.lbDetail.style.display = 'none';
+
+            // 刷新列表
+            this._populateSongFilter();
+            this._renderLeaderboardList();
+        }
+    }
+
+    /** 导出全部排行榜数据 */
+    _exportAllRecords() {
+        if (typeof leaderboard === 'undefined') return;
+
+        const jsonStr = leaderboard.exportAll();
+        const now = new Date();
+        leaderboard.downloadFile(jsonStr, `CyberBeat_Leaderboard_${now.getTime()}.json`);
+    }
+
+    /** 导入排行榜数据 */
+    _importRecords(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const result = leaderboard.importData(e.target.result, 'merge');
+                if (result.success) {
+                    alert(result.message);
+                } else {
+                    alert('Import failed: ' + result.message);
+                }
+                this._populateSongFilter();
+                this._renderLeaderboardList();
+            } catch (err) {
+                alert('Import error: ' + err.message);
+            }
+            event.target.value = '';
+        };
+
+        reader.onerror = () => {
+            alert('Failed to read file.');
+            event.target.value = '';
+        };
+
+        reader.readAsText(file);
+    }
+
+    /** 获取记录排名等级 CSS class */
+    _getRecordRankClass(rank) {
+        switch (rank) {
+            case 'S': return 'rank-s';
+            case 'A': return 'rank-a';
+            case 'B': return 'rank-b';
+            case 'C': return 'rank-c';
+            case 'F': return 'rank-f';
+            default: return 'rank-c';
+        }
+    }
+
+    /** 获取排名颜色 */
+    _getRankColor(rank) {
+        switch (rank) {
+            case 'S': return '#ffd43b';
+            case 'A': return '#4dabf7';
+            case 'B': return '#69db7c';
+            case 'C': return '#ffffff';
+            case 'F': return '#ff6b6b';
+            default: return '#ffffff';
+        }
+    }
+
+    /** HTML 属性转义 */
+    _escapeAttr(str) {
+        return (str || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     /**

@@ -28,6 +28,9 @@
                 </div>
                 
                 <div class="start-actions">
+                    <button class="btn btn-secondary" id="leaderboardStartBtn">
+                        <span class="btn-icon">🏆</span> RECORDS
+                    </button>
                     <button class="btn btn-secondary" id="settingsBtn" disabled>
                         <span class="btn-icon">⚙</span> SETTING
                     </button>
@@ -213,14 +216,82 @@
                 
                 <!-- 按钮操作 -->
                 <div class="result-actions">
-                    <button class="btn btn-secondary" id="exportBtn">📊 EXPORT RESULT</button>
-                    <button class="btn btn-primary" id="homeBtn">🏠 HOME</button>
+                    <button class="btn btn-purple" id="retryBtn">🔄 RETRY</button>
+                    <button class="btn btn-secondary" id="leaderboardBtn">🏆 LEADERBOARD</button>
+                    <div class="result-actions-row">
+                        <button class="btn btn-secondary" id="exportBtn">📊 EXPORT JSON</button>
+                        <button class="btn btn-primary" id="homeBtn">🏠 HOME</button>
+                    </div>
                 </div>
             </div>
         </div>
         
         <!-- 隐藏的结算音频播放器 -->
         <audio id="resultAudio" preload="auto"></audio>
+    </div>
+
+    <!-- ==================== 排行榜画面 ==================== -->
+    <div id="leaderboardScreen" class="screen hidden">
+        <div class="lb-overlay">
+            <div class="lb-card">
+                <div class="lb-header">
+                    <h2>🏆 LEADERBOARD</h2>
+                    <button class="lb-close-btn" id="lbCloseBtn">✕</button>
+                </div>
+
+                <!-- 歌曲筛选 -->
+                <div class="lb-filter">
+                    <label class="lb-filter-label">SONG</label>
+                    <select id="lbSongFilter" class="lb-select">
+                        <option value="__all__">All Songs</option>
+                    </select>
+                </div>
+
+                <!-- 排序选项 -->
+                <div class="lb-sort">
+                    <span class="lb-sort-label">SORT BY</span>
+                    <button class="lb-sort-btn active" data-sort="date">DATE</button>
+                    <button class="lb-sort-btn" data-sort="score">SCORE</button>
+                    <button class="lb-sort-btn" data-sort="accuracy">ACC</button>
+                </div>
+
+                <!-- 记录列表 -->
+                <div class="lb-list-wrapper">
+                    <div class="lb-list" id="lbList">
+                        <div class="lb-empty">
+                            <span class="lb-empty-icon">📭</span>
+                            <span>No records yet</span>
+                            <span class="lb-empty-hint">Play a song to record your score!</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 详情面板（展开后显示折线图等） -->
+                <div class="lb-detail" id="lbDetail" style="display:none;">
+                    <div class="lb-detail-header">
+                        <span id="lbDetailTitle">Record Detail</span>
+                        <button class="lb-detail-close" id="lbDetailClose">✕</button>
+                    </div>
+                    <div class="lb-detail-chart">
+                        <canvas id="lbChartCanvas"></canvas>
+                    </div>
+                    <div class="lb-detail-stats" id="lbDetailStats"></div>
+                    <div class="lb-detail-actions">
+                        <button class="btn btn-danger btn-sm" id="lbDetailDelete">⚠ DELETE RECORD</button>
+                    </div>
+                </div>
+
+                <!-- 导入/导出操作 -->
+                <div class="lb-io">
+                    <button class="btn btn-secondary btn-sm" id="lbExportAllBtn">📤 EXPORT ALL</button>
+                    <button class="btn btn-secondary btn-sm" id="lbImportBtn">📥 IMPORT</button>
+                    <input type="file" id="lbImportFile" accept=".json" class="lb-file-input">
+                </div>
+
+                <!-- 返回 -->
+                <button class="btn btn-primary" id="lbBackBtn">← BACK</button>
+            </div>
+        </div>
     </div>
 
     <!-- ==================== 移动端触控轨道 ==================== -->
@@ -247,6 +318,8 @@
 
     <script src="js/perf-monitor.js"></script>
     <script src="js/config.js"></script>
+    <script src="js/settings-store.js"></script>
+    <script src="js/leaderboard.js"></script>
     <script src="js/game-state.js"></script>
     <script src="js/audio-engine.js"></script>
     <script src="js/midi-parser.js"></script>

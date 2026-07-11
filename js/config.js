@@ -127,6 +127,18 @@ let selectedSongDisplayName = null;
 // 当前音量 (0-10)
 let currentVolume = CONFIG.defaultVolume;
 
+// ==================== 应用持久化设置 ====================
+// 在 settings-store.js 加载后，用存储的设置覆盖默认值
+function applyStoredSettings() {
+    if (typeof settingsStore !== 'undefined') {
+        const s = settingsStore.load();
+        if (s.noteSpeed !== undefined) noteSpeed = s.noteSpeed;
+        if (s.volume !== undefined) currentVolume = s.volume;
+        if (s.noteStyle !== undefined) noteStyle = s.noteStyle;
+        if (s.difficulty !== undefined) selectedDifficulty = s.difficulty;
+    }
+}
+
 // ==================== 音频配置（从 data/audio.json 加载） ====================
 
 let AUDIO_CONFIG = null;
