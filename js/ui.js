@@ -789,6 +789,7 @@ class UIManager {
         // 手动设置游戏状态（不使用 initForGame 以兼容倒计时）
         gameState.screen = 'game';
         gameState.notes = notes;
+        gameState.totalNotes = notes.length;
         gameState.isPlaying = true;
         gameState.intervalStartTime = performance.now() + countdownMs;
 
@@ -825,14 +826,18 @@ class UIManager {
         gameState.activeHolds = [null, null, null, null];
         gameState.holdReleaseTimes = [0, 0, 0, 0];
 
-        const accuracy = gameState.calculateTotalAcc();
-        let rank = 'C';
-        if (accuracy >= 95 && gameState.miss === 0) rank = 'S';
-        else if (accuracy >= 85) rank = 'A';
-        else if (accuracy >= 70) rank = 'B';
-
         // 判断是否失败
         const isGameFailed = gameState.health <= 0;
+
+        // 计算最终分数（判定分 + 连击分）
+        const scoreResult = gameState.calculateFinalScore();
+        gameState.score = scoreResult.finalScore;
+
+        const accuracy = gameState.calculateTotalAcc();
+
+        // 根据分数计算等级
+        const rankResult = gameState.calculateRank(scoreResult.finalScore, isGameFailed);
+        const rank = rankResult.rank;
         
         // 获取 DOM 元素
         const resultCard = document.getElementById('resultCard');
@@ -843,25 +848,37 @@ class UIManager {
         const statusText = document.getElementById('statusText');
 
         // 更新排名显示
-        rankDisplay.textContent = isGameFailed ? 'F' : rank;
+        rankDisplay.textContent = rank;
         rankDisplay.className = 'rank';
         
-        // 根据状态更新 UI 样式
+        // 根据等级设置特殊样式
+        resultCard.classList.remove('result-failed', 'result-phi', 'result-v', 'result-s', 'result-a');
         if (isGameFailed) {
             resultCard.classList.add('result-failed');
+        } else if (rank === 'φ') {
+            resultCard.classList.add('result-phi');
+        } else if (rank === 'V') {
+            resultCard.classList.add('result-v');
+        } else if (rank === 'S') {
+            resultCard.classList.add('result-s');
+        } else if (rank === 'A') {
+            resultCard.classList.add('result-a');
+        }
+
+        // 根据状态更新 UI 样式
+        if (isGameFailed) {
             statusEl.classList.add('failed');
             statusIcon.textContent = '❌';
             statusText.textContent = 'FAILED';
-            rankLabel.textContent = 'FAILED';
         } else {
-            resultCard.classList.remove('result-failed');
             statusEl.classList.remove('failed');
             statusIcon.textContent = '✓';
             statusText.textContent = 'COMPLETED';
-            rankLabel.textContent = isGameFailed ? 'FAILED' : this.getRankLabel(rank);
         }
 
-        this.finalScore.textContent    = gameState.score.toLocaleString();
+        rankLabel.textContent = rankResult.rankLabel;
+
+        this.finalScore.textContent    = scoreResult.finalScore.toLocaleString();
         this.finalCombo.textContent    = gameState.maxCombo;
         this.finalAccuracy.textContent = accuracy.toFixed(2) + '%';
         this.finalPerfect.textContent  = gameState.perfect;
@@ -910,10 +927,13 @@ class UIManager {
     // 根据等级返回标签文本
     getRankLabel(rank) {
         const rankLabels = {
+            'φ': 'PHI',
+            'V': 'WHITE V',
             'S': 'PERFECT',
             'A': 'EXCELLENT',
             'B': 'GOOD',
-            'C': 'PASS'
+            'C': 'PASS',
+            'F': 'FAILED'
         };
         return rankLabels[rank] || 'PASS';
     }
@@ -1281,16 +1301,17 @@ class UIManager {
                 const isPerfect = timeDiff <= perfectWindow;
                 activeHolds[track] = note;
 
+                const perNoteMax = gameState.getPerNoteMaxScore();
                 if (isPerfect) {
                     gameState.perfect++;
                     gameState.intervalStats.perfect++;
-                    gameState.score += 100;
+                    gameState.judgmentScore += perNoteMax;
                     renderer.addJudgment('PERFECT', judgmentY, track);
                     audioEngine.playHitSound('perfect');
                 } else {
                     gameState.great++;
                     gameState.intervalStats.great++;
-                    gameState.score += 50;
+                    gameState.judgmentScore += perNoteMax * 0.65;
                     renderer.addJudgment('GREAT', judgmentY, track);
                     audioEngine.playHitSound('great');
                 }
@@ -1307,16 +1328,17 @@ class UIManager {
             note.hit = true;
             const isPerfect = timeDiff <= perfectWindow;
 
+            const perNoteMax = gameState.getPerNoteMaxScore();
             if (isPerfect) {
                 gameState.perfect++;
                 gameState.intervalStats.perfect++;
-                gameState.score += 100 * (1 + gameState.combo * 0.1);
+                gameState.judgmentScore += perNoteMax;
                 renderer.addJudgment('PERFECT', judgmentY, track);
                 audioEngine.playHitSound('perfect');
             } else {
                 gameState.great++;
                 gameState.intervalStats.great++;
-                gameState.score += 50 * (1 + gameState.combo * 0.05);
+                gameState.judgmentScore += perNoteMax * 0.65;
                 renderer.addJudgment('GREAT', judgmentY, track);
                 audioEngine.playHitSound('great');
             }
@@ -1873,6 +1895,8 @@ class UIManager {
     /** 获取记录排名等级 CSS class */
     _getRecordRankClass(rank) {
         switch (rank) {
+            case 'φ': return 'rank-phi';
+            case 'V': return 'rank-v';
             case 'S': return 'rank-s';
             case 'A': return 'rank-a';
             case 'B': return 'rank-b';
@@ -1885,6 +1909,8 @@ class UIManager {
     /** 获取排名颜色 */
     _getRankColor(rank) {
         switch (rank) {
+            case 'φ': return '#ffd700';
+            case 'V': return '#e0e0e0';
             case 'S': return '#ffd43b';
             case 'A': return '#4dabf7';
             case 'B': return '#69db7c';
@@ -1964,9 +1990,6 @@ class UIManager {
                 gameState.activeHolds[track] = null;
                 gameState.holdReleaseTimes[track] = 0;
 
-                const holdDuration = holdNote.endTime - holdNote.time;
-                const holdBonus = Math.floor(holdDuration / 100) * 10;
-                gameState.score += 100 + holdBonus;
                 gameState.health = Math.min(CONFIG.health.initial, gameState.health + 1);
 
                 const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;

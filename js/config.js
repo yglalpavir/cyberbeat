@@ -52,7 +52,14 @@ const CONFIG = {
     defaultVolume: 4,
     
     // 倒计时时长 (ms)
-    countdownDuration: 3000
+    countdownDuration: 3000,
+
+    // ==================== 积分系统 ====================
+    // 单曲满分 1,000,000 = 判定分 900,000 + 连击分 100,000
+    maxScore: 1000000,
+    judgmentScoreMax: 900000,
+    comboScoreMax: 100000
+
 };
 
 // ==================== 从 judge.json 加载判定配置 ====================

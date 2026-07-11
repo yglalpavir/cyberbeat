@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberBeat Pixel — 帮助 / FAQ</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            padding: 0;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            overflow-y: auto;
+            overflow-x: hidden;
+            position: relative;
+            height: 100vh;
+            height: 100dvh;
+        }
+        .faq-container {
+            width: 100%;
+            max-width: 820px;
+            padding: 40px 24px 60px;
+            font-family: var(--font-family);
+            line-height: 1.75;
+        }
+
+        /* 头部 */
+        .faq-header {
+            text-align: center;
+            margin-bottom: 48px;
+            padding-bottom: 28px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .faq-header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+        .faq-header .faq-subtitle {
+            font-size: 0.9rem;
+            color: var(--text-tertiary);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+        .faq-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 20px;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            transition: color var(--transition-fast);
+        }
+        .faq-back:hover {
+            color: var(--accent-strong);
+        }
+
+        /* 目录 */
+        .faq-toc {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 24px 28px;
+            margin-bottom: 40px;
+        }
+        .faq-toc h2 {
+            font-size: 0.8rem;
+            letter-spacing: 2px;
+            color: var(--text-tertiary);
+            margin-bottom: 14px;
+            text-transform: uppercase;
+        }
+        .faq-toc ol {
+            list-style: none;
+            counter-reset: toc;
+            padding: 0;
+        }
+        .faq-toc ol li {
+            counter-increment: toc;
+            margin-bottom: 6px;
+        }
+        .faq-toc ol li a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color var(--transition-fast);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .faq-toc ol li a::before {
+            content: counter(toc) ".";
+            color: var(--accent);
+            font-weight: 700;
+            font-size: 0.8rem;
+            min-width: 20px;
+        }
+        .faq-toc ol li a:hover {
+            color: var(--text-primary);
+        }
+
+        /* 章节 */
+        .faq-section {
+            margin-bottom: 44px;
+        }
+        .faq-section h2 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .faq-section h2 .sec-icon {
+            font-size: 1.3rem;
+        }
+        .faq-section h3 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin: 20px 0 10px;
+            letter-spacing: 0.5px;
+        }
+        .faq-section p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+        .faq-section ul, .faq-section ol {
+            margin: 8px 0 16px 20px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        .faq-section ul li, .faq-section ol li {
+            margin-bottom: 6px;
+        }
+
+        /* 判定徽章 */
+        .judge-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+        }
+        .judge-perfect {
+            background: rgba(255, 215, 0, 0.18);
+            color: #ffd700;
+        }
+        .judge-great {
+            background: rgba(105, 219, 124, 0.18);
+            color: #69db7c;
+        }
+        .judge-miss {
+            background: rgba(255, 107, 107, 0.18);
+            color: #ff6b6b;
+        }
+
+        /* 排行徽章 */
+        .rank-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            font-weight: 900;
+            font-size: 1.1rem;
+            margin: 0 4px;
+        }
+        .rank-s { background: linear-gradient(135deg, #ffd700, #ffaa00); color: #1a1a2e; }
+        .rank-a { background: var(--purple); color: #fff; }
+        .rank-b { background: var(--accent); color: #fff; }
+        .rank-c { background: var(--bg-card); color: var(--text-secondary); border: 1px solid var(--border-medium); }
+        .rank-f { background: var(--danger); color: #fff; }
+
+        /* 表格 */
+        .faq-table-wrapper {
+            overflow-x: auto;
+            margin: 16px 0 20px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }
+        .faq-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            background: var(--bg-surface);
+        }
+        .faq-table thead th {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-weight: 700;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-medium);
+        }
+        .faq-table tbody td {
+            padding: 10px 16px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .faq-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+        .faq-table tbody tr:hover {
+            background: rgba(255,255,255,0.03);
+        }
+
+        /* 公式块 */
+        .formula-block {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 14px 18px;
+            margin: 12px 0 18px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* 提示框 */
+        .faq-note {
+            background: rgba(77, 171, 247, 0.08);
+            border-left: 3px solid var(--accent);
+            padding: 12px 16px;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 16px 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .faq-note strong {
+            color: var(--accent);
+        }
+
+        .faq-warning {
+            background: rgba(255, 107, 107, 0.08);
+            border-left: 3px solid var(--danger);
+            padding: 12px 16px;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 16px 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        /* 响应式 */
+        @media (max-width: 600px) {
+            .faq-container {
+                padding: 24px 16px 48px;
+            }
+            .faq-header h1 { font-size: 1.5rem; }
+            .faq-section h2 { font-size: 1.05rem; }
+            .faq-table { font-size: 0.78rem; }
+            .faq-table thead th, .faq-table tbody td { padding: 8px 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="faq-container">
+
+        <!-- ========== 头部 ========== -->
+        <div class="faq-header">
+            <h1>CYBER BEAT</h1>
+            <div class="faq-subtitle">Player Guide &amp; FAQ</div>
+            <a class="faq-back" href="index.html">← 返回游戏</a>
+        </div>
+
+        <!-- ========== 目录 ========== -->
+        <div class="faq-toc">
+            <h2>目录</h2>
+            <ol>
+                <li><a href="#sec-overview">游戏简介</a></li>
+                <li><a href="#sec-controls">操作方式</a></li>
+                <li><a href="#sec-notetypes">音符类型</a></li>
+                <li><a href="#sec-judgment">判定系统</a></li>
+                <li><a href="#sec-scoring">计分系统</a></li>
+                <li><a href="#sec-combo">连击系统</a></li>
+                <li><a href="#sec-health">血量系统</a></li>
+                <li><a href="#sec-accuracy">准确率计算</a></li>
+                <li><a href="#sec-rank">等级评定</a></li>
+                <li><a href="#sec-difficulty">难度说明</a></li>
+                <li><a href="#sec-settings">设置说明</a></li>
+                <li><a href="#sec-tips">常见问题与小贴士</a></li>
+            </ol>
+        </div>
+
+        <!-- ========== 1. 游戏简介 ========== -->
+        <div class="faq-section" id="sec-overview">
+            <h2><span class="sec-icon">🎮</span> 1. 游戏简介</h2>
+            <p>
+                <strong>CyberBeat Pixel</strong> 是一款赛博朋克风格的 4K 下落式节奏游戏（VSRG）。
+                音符从屏幕上方沿四条轨道下落，玩家需要在音符到达判定线时精确按下对应按键。
+            </p>
+            <p>游戏支持三种谱面来源：</p>
+            <ul>
+                <li><strong>MIDI 模式</strong> — 导入 <code>.mid</code> 文件，由算法自动生成谱面</li>
+                <li><strong>SONGS 模式</strong> — 载入预编写的 <code>.mc</code> 谱面文件，体验精心编排的关卡</li>
+                <li><strong>预设模式</strong> — 随机生成节奏谱面，适合快速体验</li>
+            </ul>
+        </div>
+
+        <!-- ========== 2. 操作方式 ========== -->
+        <div class="faq-section" id="sec-controls">
+            <h2><span class="sec-icon">🎹</span> 2. 操作方式</h2>
+            <p>游戏使用 <strong>4 键</strong>布局，每个按键对应一条轨道：</p>
+
+            <div class="faq-table-wrapper">
+                <table class="faq-table">
+                    <thead>
+                        <tr>
+                            <th>轨道</th>
+                            <th>按键</th>
+                            <th>手指</th>
+                            <th>颜色</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>轨道 1（最左）</td>
+                            <td><strong>D</strong></td>
+                            <td>左手食指</td>
+                            <td><span style="display:inline-block;width:14px;height:14px;background:#4dabf7;border-radius:3px;vertical-align:middle;"></span> 蓝</td>
+                        </tr>
+                        <tr>
+                            <td>轨道 2</td>
+                            <td><strong>F</strong></td>
+                            <td>左手中指</td>
+                            <td><span style="display:inline-block;width:14px;height:14px;background:#69db7c;border-radius:3px;vertical-align:middle;"></span> 绿</td>
+                        </tr>
+                        <tr>
+                            <td>轨道 3</td>
+                            <td><strong>J</strong></td>
+                            <td>右手食指</td>
+                            <td><span style="display:inline-block;width:14px;height:14px;background:#ff6b6b;border-radius:3px;vertical-align:middle;"></span> 红</td>
+                        </tr>
+                        <tr>
+                            <td>轨道 4（最右）</td>
+                            <td><strong>K</strong></td>
+                            <td>右手中指</td>
+                            <td><span style="display:inline-block;width:14px;height:14px;background:#ffd43b;border-radius:3px;vertical-align:middle;"></span> 黄</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <p>此外，游戏还支持：</p>
+            <ul>
+                <li><strong>触摸屏</strong> — 直接点击轨道区域</li>
+                <li><strong>空格键双按</strong> — 游戏中快速按两次空格（间隔 &lt; 400ms）可立即结束当前对局</li>
+            </ul>
+        </div>
+
+        <!-- ========== 3. 音符类型 ========== -->
+        <div class="faq-section" id="sec-notetypes">
+            <h2><span class="sec-icon">🎵</span> 3. 音符类型</h2>
+
+            <h3>3.1 Tap（单击音符）</h3>
+            <p>
+                最基础的音符类型。音符到达判定线时，<strong>按下对应轨道的按键一次</strong>即可完成。
+                命中判定（PERFECT/GOOD）决定该音符的判定分。
+            </p>
+            <p>外观：圆形（Orb 样式）或矩形（Pixel 样式），带有对应轨道颜色。</p>
+
+            <h3>3.2 Hold（长条音符）</h3>
+            <p>
+                Hold 音符由一个<strong>头部</strong>和一个<strong>尾部</strong>组成，中间为持续条。
+            </p>
+            <ul>
+                <li><strong>头部</strong>：到达判定线时按下对应按键</li>
+                <li><strong>持续</strong>：<strong>按住不放</strong>直到尾部到达判定线</li>
+                <li><strong>尾部</strong>：到达判定线时自动完成（无需额外操作）</li>
+            </ul>
+            <div class="faq-warning">
+                <strong>⚠ 注意：</strong>如果在 Hold 持续期间松手，有 <strong>40ms 宽限期</strong>可以重新按下恢复。
+                超过 40ms 未补按将判定为 <span class="judge-badge judge-miss">MISS</span>，Combo 归零并扣血。
+            </div>
+            <p>外观：带渐变色的长条矩形 + 尾部圆角标记。</p>
+        </div>
+
+        <!-- ========== 4. 判定系统 ========== -->
+        <div class="faq-section" id="sec-judgment">
+            <h2><span class="sec-icon">⚡</span> 4. 判定系统</h2>
+            <p>
+                当音符到达判定线（位于屏幕 <strong>85%</strong> 高度处）时，系统根据按键时机给出判定。
+                游戏共有 <strong>3 种判定</strong>：
+            </p>
+
+            <div class="faq-table-wrapper">
+                <table class="faq-table">
+                    <thead>
+                        <tr>
+                            <th>判定</th>
+                            <th>时间窗口</th>
+                            <th>含义</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="judge-badge judge-perfect">PERFECT</span></td>
+                            <td>±<strong>40ms</strong> 以内</td>
+                            <td>精准命中，获得最高分数</td>
+                        </tr>
+                        <tr>
+                            <td><span class="judge-badge judge-great">GREAT</span></td>
+                            <td>±<strong>40ms ~ 90ms</strong></td>
+                            <td>稍有偏差，仍算命中但分数较低</td>
+                        </tr>
+                        <tr>
+                            <td><span class="judge-badge judge-miss">MISS</span></td>
+                            <td>超出 ±90ms 或未按下</td>
+                            <td>未命中，Combo 归零并扣血</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="faq-note">
+                <strong>💡 提示：</strong>判定窗口时间非常严格。PERFECT 只有 ±40ms——不到 1/25 秒。
+                建议调整音符速度以获得最佳读谱体验。
+            </div>
+
+            <h3>4.1 判定特效</h3>
+            <p>每次命中都会触发以下视觉反馈：</p>
+            <ul>
+                <li><strong>判定文字</strong>：PERFECT（金色）/ GREAT（绿色）/ MISS（红色）浮动文字</li>
+                <li><strong>激光特效</strong>：从判定线向上射出对应颜色的激光束（最长持续 1 秒）</li>
+                <li><strong>粒子爆散</strong>：8 颗粒子向四周扩散（最长持续 1.2 秒）</li>
+            </ul>
+
+            <h3>4.2 打击音效</h3>
+            <div class="faq-table-wrapper">
+                <table class="faq-table">
+                    <thead>
+                        <tr>
+                            <th>判定</th>
+                            <th>频率</th>
+                            <th>波形</th>
+                            <th>持续</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="judge-badge judge-perfect">PERFECT</span></td>
+                            <td>1200Hz</td>
+                            <td>方波</td>
+                            <td>0.1s</td>
+                        </tr>
+                        <tr>
+                            <td><span class="judge-badge judge-great">GREAT</span></td>
+                            <td>900Hz</td>
+                            <td>方波</td>
+                            <td>0.1s</td>
+                        </tr>
+                        <tr>
+                            <td><span class="judge-badge judge-miss">MISS</span></td>
+                            <td>200Hz</td>
+                            <td>方波</td>
+                            <td>0.1s</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ========== 5. 计分系统 ========== -->
+        <div class="faq-section" id="sec-scoring">
+            <h2><span class="sec-icon">📊</span> 5. 计分系统</h2>
+
+            <p>
+                每张谱面的满分固定为 <strong>1,000,000</strong> 分，由两部分组成：
+            </p>
+
+            <div class="formula-block">
+总分 = 判定分（最高 900,000） + 连击分（最高 100,000）
+            </div>
+
+            <h3>5.1 判定分（最高 900,000）</h3>
+            <p>判定分由每个音符的命中判定决定。每个音符的最大判定分为：</p>
+            <div class="formula-block">
+单个音符最大判定分 = 900,000 ÷ 总音符数
+            </div>
+
+            <div class="faq-table-wrapper">
+                <table class="faq-table">
+                    <thead>
+                        <tr>
+                            <th>判定</th>
+                            <th>获得比例</th>
+                            <th>示例（总音符数=300，单Note最大=3,000）</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="judge-badge judge-perfect">PERFECT</span></td>
+                            <td><strong>100%</strong></td>
+                            <td>获得 3,000 判定分</td>
+                        </tr>
+                        <tr>
+                            <td><span class="judge-badge judge-great">GOOD</span></td>
+                            <td><strong>65%</strong></td>
+                            <td>获得 1,950 判定分</td>
+                        </tr>
+                        <tr>
+                            <td><span class="judge-badge judge-miss">MISS</span></td>
+                            <td><strong>0%</strong></td>
+                            <td>获得 0 判定分</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="faq-note">
+                <strong>💡 关键：</strong>每个 PERFECT 都至关重要——少一个 PERFECT 就少 35% 的单Note判定分。
+                总音符数越少的谱面，每个音符的权重越大。
+            </div>
+
+            <h3>5.2 连击分（最高 100,000）</h3>
+            <p>连击分由<strong>最大连击数（Max Combo）</strong>与<strong>总音符数</strong>的比值决定：</p>
+            <div class="formula-block">
+连击分 = floor(Max Combo ÷ 总音符数 × 100,000)
+            </div>
+
+            <p>示例：总音符数 300，Max Combo = 240</p>
+            <div class="formula-block">
+连击分 = floor(240 ÷ 300 × 100,000) = floor(80,000) = 80,000 分
+            </div>
+
+            <div class="faq-note">
+                <strong>💡 关键：</strong>连击分只看 <strong>Max Combo</strong>（历史最高连击数），即使中途断连也不要紧——
+                只要曾经达到过较高的 Combo 数就能拿到对应的连击分。要拿满 100,000 连击分，必须 Full Combo（Max Combo = 总音符数）。
+            </div>
+        </div>
+
+        <!-- ========== 6. 连击系统 ========== -->
+        <div class="faq-section" id="sec-combo">
+            <h2><span class="sec-icon">🔥</span> 6. 连击系统</h2>
+            <ul>
+                <li>每成功命中一个音符，<strong>Combo +1</strong></li>
+                <li>系统会追踪你的 <strong>Max Combo</strong>（本局最高连击数），直接影响连击分</li>
+                <li>一旦发生 <span class="judge-badge judge-miss">MISS</span>，Combo <strong>立即归零</strong></li>
+                <li>Combo <strong>没有上限</strong></li>
+            </ul>
+            <p>游戏中，Combo 数实时显示在屏幕中央的 HUD 上。</p>
+            <div class="faq-note">
+                <strong>💡 注意：</strong>Hold 音符的头部命中<strong>也会使 Combo +1</strong>。
+                连击分只与 Max Combo 和总音符数的比值有关（详见<a href="#sec-scoring">计分系统</a>）。
+            </div>
+        </div>
+
+        <!-- ========== 7. 血量系统 ========== -->
+        <div class="faq-section" id="sec-health">
+            <h2><span class="sec-icon">❤️</span> 7. 血量系统</h2>
+
+            <div class="faq-table-wrapper">
+                <table class="faq-table">
+                    <thead>
+                        <tr>
+                            <th>事件</th>
+                            <th>血量变化</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>初始血量</td>
+                            <td><strong>100</strong></td>
+                        </tr>
+                        <tr>
+                            <td>命中（PERFECT / GREAT）</td>
+                            <td style="color: #69db7c;">+2</td>
+                        </tr>
+                        <tr>
+                            <td>Hold 尾部完成</td>
+                            <td style="color: #69db7c;">+1</td>
+                        </tr>
+                        <tr>
+                            <td>MISS（未命中/松手超时）</td>
+                            <td style="color: #ff6b6b;">−10</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <p>血条显示在屏幕右上角，颜色随血量变化：</p>
+            <ul>
+                <li><span style="color:#69db7c;">🟢 绿色</span> — 血量 &gt; 60（安全）</li>
+                <li><span style="color:#ffd43b;">🟡 黄色</span> — 血量 30~60（注意）</li>
+                <li><span style="color:#ff6b6b;">🔴 红色</span> — 血量 &lt; 30（危险）</li>
+            </ul>
+
+            <div class="faq-warning">
+                <strong>⚠ 重要：</strong>血量 ≤ 0 时，游戏<strong>立即结束</strong>，无论歌曲是否播完。
+                最终等级将判定为 <span class="rank-badge rank-f">F</span>（FAILED）。
+            </div>
+        </div>
+
+        <!-- ========== 8. 准确率计算 ========== -->
+        <div class="faq-section" id="sec-accuracy">
+            <h2><span class="sec-icon">🎯</span> 8. 准确率计算</h2>
+
+            <div class="formula-block">
+准确率 = (PERFECT × 100 + GOOD × 65) / (PERFECT + GOOD + MISS)
+
+其中：
+  PERFECT 权重 = 100%
+  GOOD     权重 = 65%
+  MISS     权重 = 0%
+            </div>
+
+            <p>例如：一局中命中 200 个 PERFECT、30 个 GOOD、5 个 MISS：</p>
+            <div class="formula-block">
+(200×100 + 30×65) / (200 + 30 + 5)
+= (20000 + 1950) / 235
+= 21950 / 235
+≈ 93.40%
+            </div>
+
+            <p>
+                游戏每 <strong>2 秒</strong>记录一次区间准确率，存入性能历史，结算时以折线图展示你的发挥波动。
+            </p>
+        </div>
+
+        <!-- ========== 9. 等级评定 ========== -->
+        <div class="faq-section" id="sec-rank">
+            <h2><span class="sec-icon">🏆</span> 9. 等级评定</h2>
+
+            <p>游戏结束后，根据<strong>最终分数</strong>评定等级：</p>
+
+            <div class="faq-table-wrapper">
+                <table class="faq-table">
+                    <thead>
+                        <tr>
+                            <th>等级</th>
+                            <th>分数区间</th>
+                            <th>标签</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="rank-badge rank-s" style="background:linear-gradient(135deg,#ffd700,#ffaa00);color:#1a1a2e;">φ</span></td>
+                            <td><strong>1,000,000</strong>（满分）</td>
+                            <td>PHI</td>
+                        </tr>
+                        <tr>
+                            <td><span class="rank-badge rank-s" style="background:linear-gradient(135deg,#e0e0e0,#a0a0a0);color:#1a1a2e;">V</span></td>
+                            <td><strong>960,000 ~ 999,999</strong></td>
+                            <td>WHITE V</td>
+                        </tr>
+                        <tr>
+                            <td><span class="rank-badge rank-s">S</span></td>
+                            <td><strong>920,000 ~ 959,999</strong></td>
+                            <td>PERFECT</td>
+                        </tr>
+                        <tr>
+                            <td><span class="rank-badge rank-a">A</span></td>
+                            <td><strong>880,000 ~ 919,999</strong></td>
+                            <td>EXCELLENT</td>
+                        </tr>
+                        <tr>
+                            <td><span class="rank-badge rank-b">B</span></td>
+                            <td><strong>820,000 ~ 879,999</strong></td>
+                            <td>GOOD</td>
+                        </tr>
+                        <tr>
+                            <td><span class="rank-badge rank-c">C</span></td>
+                            <td><strong>700,000 ~ 819,999</strong></td>
+                            <td>PASS</td>
+                        </tr>
+                        <tr>
+                            <td><span class="rank-badge rank-f">F</span></td>
+                            <td>&lt; 700,000 或血量归零</td>
+                            <td>FAILED</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="faq-note">
+                <strong>💡 φ (Phi) 级：</strong>需要打出 1,000,000 满分——要求全 Perfect（Full Perfect）且 Max Combo 等于总音符数。
+                这是游戏中的最高荣誉！
+            </div>
+            <div class="faq-note">
+                <strong>💡 白 V 级：</strong>需要 960,000 分以上，基本要求接近零失误且高连击。是仅次于 φ 的高级评价。
+            </div>
+        </div>
+
+        <!-- ========== 10. 难度说明 ========== -->
+        <div class="faq-section" id="sec-difficulty">
+            <h2><span class="sec-icon">📈</span> 10. 难度说明</h2>
+
+            <p>
+                难度设置<strong>仅对 MIDI 算法生成谱面有效</strong>；.mc 预编写谱面使用固定的编排，不受难度影响。
+            </p>
+
+            <div class="faq-table-wrapper">
+                <table class="faq-table">
+                    <thead>
+                        <tr>
+                            <th>难度</th>
+                            <th>最小音符间隔</th>
+                            <th>同轨最小间隔</th>
+                            <th>最大同时音符</th>
+                            <th>能量阈值</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>EASY</strong></td>
+                            <td>400ms</td>
+                            <td>800ms</td>
+                            <td>3</td>
+                            <td>0.6</td>
+                        </tr>
+                        <tr>
+                            <td><strong>EASY+</strong></td>
+                            <td>250ms</td>
+                            <td>500ms</td>
+                            <td>5</td>
+                            <td>0.5</td>
+                        </tr>
+                        <tr>
+                            <td><strong>NORMAL</strong></td>
+                            <td>150ms</td>
+                            <td>250ms</td>
+                            <td>10</td>
+                            <td>0.3</td>
+                        </tr>
+                        <tr>
+                            <td><strong>NORMAL+</strong>（默认）</td>
+                            <td>50ms</td>
+                            <td>120ms</td>
+                            <td>25</td>
+                            <td>0.1</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <ul>
+                <li><strong>最小音符间隔</strong>：任意两个音符之间的最短时间距离</li>
+                <li><strong>同轨最小间隔</strong>：同一轨道上连续音符的最短时间距离（用于控制 Jack 密度）</li>
+                <li><strong>最大同时音符</strong>：同一时刻最多同时出现的音符数（和弦/叠加数上限）</li>
+                <li><strong>能量阈值</strong>：MIDI velocity 归一化值低于此阈值的音符将被过滤掉（值越低 = 保留越多轻音）</li>
+            </ul>
+        </div>
+
+        <!-- ========== 11. 设置说明 ========== -->
+        <div class="faq-section" id="sec-settings">
+            <h2><span class="sec-icon">⚙️</span> 11. 设置说明</h2>
+
+            <h3>11.1 音符速度（Speed）</h3>
+            <p>
+                调整音符下落速度。范围 <strong>6.0 ~ 21.0</strong>，步进 0.5，默认 <strong>16.0</strong>。
+                较高的速度使音符间距变大、读谱更清晰，但反应时间更短。建议新手从 10~12 开始。
+            </p>
+
+            <h3>11.2 音量（Volume）</h3>
+            <p>
+                范围 <strong>0 ~ 10</strong>，步进 1，默认 <strong>4</strong>。
+            </p>
+
+            <h3>11.3 音符样式（Note Style）</h3>
+            <ul>
+                <li><strong>Orb</strong>（默认）— 圆形音符，带有发光效果</li>
+                <li><strong>Pixel</strong> — 矩形像素风音符</li>
+            </ul>
+
+            <h3>11.4 设置持久化</h3>
+            <p>音符速度、音量、样式、难度等设置会自动保存到浏览器本地存储，下次打开游戏时自动恢复。</p>
+        </div>
+
+        <!-- ========== 12. 常见问题与小贴士 ========== -->
+        <div class="faq-section" id="sec-tips">
+            <h2><span class="sec-icon">💬</span> 12. 常见问题与小贴士</h2>
+
+            <h3>Q: 如何获得更高分数？</h3>
+            <p>
+                谱面满分为 1,000,000，其中判定分占 900,000、连击分占 100,000。
+                要提高分数：① 尽量打出 PERFECT（100% 判定分）而非 GOOD（65%）；② 保持高 Max Combo 以获取更多连击分。
+                连击分只看历史最高连击，所以即使断连也不要放弃——你仍然保留了之前的连击分。
+            </p>
+
+            <h3>Q: 为什么我全是 PERFECT 但还是拿不到 φ？</h3>
+            <p>
+                φ (Phi) 需要满分 1,000,000，这意味着：所有音符必须 PERFECT（判定分=900,000）<strong>且</strong>
+                Max Combo = 总音符数（连击分=100,000）。如果中间断过连击（即使后来全 PERFECT），
+                Max Combo &lt; 总音符数，连击分就拿不到满分。
+            </p>
+
+            <h3>Q: GREAT 和 GOOD 有什么区别？</h3>
+            <p>
+                在新积分系统中，GREAT 判定（±40~90ms）对应 <strong>Good</strong> 级别，获得单个音符 65% 的判定分。
+                而 PERFECT（±40ms 以内）获得 100%。两者差距为 35%，比旧版的 50% 差距更精细。
+            </p>
+
+            <h3>Q: Hold 音符总是断，怎么办？</h3>
+            <p>
+                确保在 Hold 头部命中后<strong>持续按住</strong>不放，直到看到尾部通过判定线。
+                虽然有 40ms 宽限期，但不要依赖它——提前松手风险很大。
+            </p>
+
+            <h3>Q: 可以在手机上玩吗？</h3>
+            <p>
+                可以！游戏支持触摸屏操作，在移动设备上直接点击轨道区域即可。建议横屏游玩以获得最佳体验。
+            </p>
+
+            <h3>Q: 可以导入自己的 MIDI 文件吗？</h3>
+            <p>
+                可以！在 MIDI 标签页点击「IMPORT MIDI」卡片，选择本地的 <code>.mid</code> 文件即可。
+                导入后会自动出现在曲库中。
+            </p>
+
+            <h3>Q: 我的成绩保存在哪里？</h3>
+            <p>
+                成绩保存在浏览器的 localStorage 中。你可以在 RECORDS（排行榜）页面查看历史记录，
+                支持按日期、分数、准确率排序，也可以导出为 JSON 文件备份。
+            </p>
+
+            <h3>Q: 如何快速结束一局游戏？</h3>
+            <p>
+                游戏中快速<strong>双击空格键</strong>（两次按下间隔 &lt; 400ms）即可立即结束。
+            </p>
+
+            <h3>🎯 进阶小贴士</h3>
+            <ul>
+                <li><strong>调整速度</strong>：找到适合自己的音符速度。速度越快，音符间距越大，读谱越容易，但反应窗口不变。</li>
+                <li><strong>专注 PERFECT</strong>：PERFECT 获得 100% 判定分，GOOD 只有 65%。在高密度谱面中，PERFECT 和 GOOD 的累计差距非常显著。</li>
+                <li><strong>Hold 不要松</strong>：Hold 中途松手是新手最常见的失误原因。虽然头部判定已经给出，但松手会导致 MISS 并断 Combo。</li>
+                <li><strong>保连击 = 保连击分</strong>：连击分基于 Max Combo，尽量在整局中至少打出一次长连击。断连后也不要气馁——之前的 Max Combo 已经锁定。</li>
+                <li><strong>善用预设模式热身</strong>：在对战高难度谱面前，先用预设模式活动手指。</li>
+                <li><strong>关注血条颜色</strong>：当血条变红时，优先确保命中率而不是追求 PERFECT。</li>
+            </ul>
+        </div>
+
+        <!-- 底部 -->
+        <div style="text-align:center;margin-top:48px;padding-top:24px;border-top:1px solid var(--border-subtle);">
+            <a class="faq-back" href="index.html">← 返回游戏</a>
+        </div>
+
+    </div>
+</body>
+</html>

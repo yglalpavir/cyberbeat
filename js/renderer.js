@@ -554,7 +554,7 @@ class Renderer {
         ctx.fillText('SCORE', 30, 30);
         ctx.font = 'bold 28px sans-serif';
         ctx.fillStyle = '#4dabf7';
-        ctx.fillText(gameState.score.toLocaleString(), 30, 55);
+        ctx.fillText(Math.round(gameState.judgmentScore).toLocaleString(), 30, 55);
 
         const hX = this.canvasWidth - 180;
         ctx.fillStyle = 'rgba(255,255,255,0.1)';

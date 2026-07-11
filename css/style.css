@@ -1028,6 +1028,49 @@ body {
     -webkit-text-fill-color: transparent;
 }
 
+/* φ (Phi) 满分 — 金色彩虹渐变 */
+.result-card.result-phi .rank {
+    background: linear-gradient(135deg, #ffd700 0%, #ffaa00 30%, #ffd700 60%, #ff8c00 100%);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: phiShimmer 2s ease-in-out infinite;
+}
+
+@keyframes phiShimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+.result-card.result-phi {
+    box-shadow: 0 0 40px rgba(255, 215, 0, 0.3), 0 0 80px rgba(255, 170, 0, 0.15);
+}
+
+/* V (White V) — 白色/银色 */
+.result-card.result-v .rank {
+    background: linear-gradient(135deg, #e8e8e8 0%, #c0c0c0 50%, #e8e8e8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.result-card.result-v {
+    box-shadow: 0 0 30px rgba(200, 200, 200, 0.25), 0 0 60px rgba(180, 180, 180, 0.1);
+}
+
+/* S — 金色 */
+.result-card.result-s .rank {
+    background: linear-gradient(135deg, var(--warning) 0%, var(--orange) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* A — 蓝色 */
+.result-card.result-a .rank {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
 .rank-label {
     font-size: 0.85rem;
     font-weight: 700;
@@ -1474,6 +1517,8 @@ body {
     flex-shrink: 0;
 }
 
+.lb-record-rank-badge.rank-phi { background: linear-gradient(135deg, rgba(255, 215, 0, 0.3), rgba(255, 170, 0, 0.2)); color: #ffd700; font-weight: 900; }
+.lb-record-rank-badge.rank-v { background: rgba(200, 200, 200, 0.2); color: #e0e0e0; font-weight: 900; }
 .lb-record-rank-badge.rank-s { background: rgba(255, 212, 59, 0.2); color: #ffd43b; }
 .lb-record-rank-badge.rank-a { background: rgba(77, 171, 247, 0.2); color: #4dabf7; }
 .lb-record-rank-badge.rank-b { background: rgba(105, 219, 124, 0.2); color: #69db7c; }
