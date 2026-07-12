@@ -7,7 +7,6 @@ class GameState {
     reset() {
         this.screen = 'start';
         this.score = 0;
-        this.judgmentScore = 0;       // 判定分累计（900,000 上限）
         this.totalNotes = 0;          // 谱面总物量
         this.combo = 0;
         this.maxCombo = 0;
@@ -50,28 +49,32 @@ class GameState {
     }
 
     /**
-     * 计算每个 Note 的最大判定分
-     * 判定分满分 900,000 / 总物量
+     * 实时判定分（基于 perfect/great 计数实时计算，消除浮点累加误差）
+     * 满分 900,000 = 判定分上限
+     * 公式：900,000 × (perfect + 0.65 × great) / totalNotes
      */
-    getPerNoteMaxScore() {
+    get judgmentScore() {
         if (this.totalNotes <= 0) return 0;
-        return CONFIG.judgmentScoreMax / this.totalNotes;
+        return Math.round(
+            CONFIG.judgmentScoreMax * (this.perfect + 0.65 * this.great) / this.totalNotes
+        );
     }
 
     /**
      * 计算最终总分 = 判定分 + 连击分
-     * 判定分：各 Note 判定累计（Perfect=100%, Good=65%）
-     * 连击分：floor(maxCombo / totalNotes * 100,000)
+     * 判定分：各 Note 判定累计（Perfect=100%, Great=65%）
+     * 连击分：floor(maxCombo / totalNotes × 100,000)
      * @returns {{ finalScore: number, judgmentScore: number, comboScore: number }}
      */
     calculateFinalScore() {
+        const judgmentScore = this.judgmentScore;
         const comboScore = this.totalNotes > 0
             ? Math.floor((this.maxCombo / this.totalNotes) * CONFIG.comboScoreMax)
             : 0;
-        const finalScore = Math.min(this.judgmentScore + comboScore, CONFIG.maxScore);
+        const finalScore = Math.min(judgmentScore + comboScore, CONFIG.maxScore);
         return {
             finalScore: Math.round(finalScore),
-            judgmentScore: Math.round(this.judgmentScore),
+            judgmentScore: judgmentScore,
             comboScore: comboScore
         };
     }

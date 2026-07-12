@@ -1300,18 +1300,17 @@ class UIManager {
                 note.holdActive = true;
                 const isPerfect = timeDiff <= perfectWindow;
                 activeHolds[track] = note;
+                // 存储头部判定结果，用于后续提前松开时修正计数
+                note._headWasPerfect = isPerfect;
 
-                const perNoteMax = gameState.getPerNoteMaxScore();
                 if (isPerfect) {
                     gameState.perfect++;
                     gameState.intervalStats.perfect++;
-                    gameState.judgmentScore += perNoteMax;
                     renderer.addJudgment('PERFECT', judgmentY, track);
                     audioEngine.playHitSound('perfect');
                 } else {
                     gameState.great++;
                     gameState.intervalStats.great++;
-                    gameState.judgmentScore += perNoteMax * 0.65;
                     renderer.addJudgment('GREAT', judgmentY, track);
                     audioEngine.playHitSound('great');
                 }
@@ -1328,17 +1327,14 @@ class UIManager {
             note.hit = true;
             const isPerfect = timeDiff <= perfectWindow;
 
-            const perNoteMax = gameState.getPerNoteMaxScore();
             if (isPerfect) {
                 gameState.perfect++;
                 gameState.intervalStats.perfect++;
-                gameState.judgmentScore += perNoteMax;
                 renderer.addJudgment('PERFECT', judgmentY, track);
                 audioEngine.playHitSound('perfect');
             } else {
                 gameState.great++;
                 gameState.intervalStats.great++;
-                gameState.judgmentScore += perNoteMax * 0.65;
                 renderer.addJudgment('GREAT', judgmentY, track);
                 audioEngine.playHitSound('great');
             }
@@ -1967,17 +1963,26 @@ class UIManager {
             if (releaseTime > 0) {
                 const elapsed = currentTime - releaseTime;
                 if (elapsed > 40) {
-                    // 宽限期超时 → Miss
+                    // 宽限期超时 → 将头部判定修正为 Miss（防止同一音符双重计数）
                     holdNote.holdActive = false;
                     holdNote.holdReleased = true;
                     gameState.activeHolds[track] = null;
                     gameState.holdReleaseTimes[track] = 0;
 
-                    const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
+                    // 如果头部已被判定为 perfect/great，修正为 miss
+                    if (holdNote._headWasPerfect === true) {
+                        gameState.perfect--;
+                        gameState.intervalStats.perfect--;
+                    } else if (holdNote._headWasPerfect === false) {
+                        gameState.great--;
+                        gameState.intervalStats.great--;
+                    }
                     gameState.miss++;
                     gameState.intervalStats.miss++;
                     gameState.combo = 0;
                     gameState.health = Math.max(0, gameState.health - CONFIG.health.lossOnMiss);
+
+                    const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
                     renderer.addJudgment('MISS', judgmentY, track);
                     audioEngine.playHitSound('miss');
                     continue;
