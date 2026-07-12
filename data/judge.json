@@ -1,8 +1,8 @@
 {
     "_comment": "CyberBeat 判定配置文件。修改数值后刷新页面即可生效。",
 
-    "perfectWindow": 40,
-    "greatWindow": 90,
+    "perfectWindow": 36,
+    "greatWindow": 80,
 
     "judgmentLineY": 0.85,
 
