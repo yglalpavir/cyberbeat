@@ -26,19 +26,21 @@ class GameState {
         this.totalNotesProcessed = 0;
         this.intervalStartTime = 0;
         this.intervalStats = { perfect: 0, great: 0, miss: 0 };
-        this.lastSpacePressTime = 0;
         // Hold 长条跟踪：每个轨道当前按住的 hold note
         this.activeHolds = [null, null, null, null];
         // Hold 松开时间跟踪（用于 40ms 宽松判定）
         this.holdReleaseTimes = [0, 0, 0, 0];
+        // 暂停状态
+        this.paused = false;
+        this.pauseStartedAt = 0;       // 暂停时的 performance.now()
+        this.pauseSnapshotTime = 0;    // 暂停时的场景时间（ms）
     }
-    
-    initForGame(notes) {
-        this.screen = 'game';
-        this.startTime = performance.now();
-        this.notes = notes;
-        this.isPlaying = true;
-        this.intervalStartTime = performance.now();
+
+    /**
+     * 获取当前场景时间（ms）：游戏开始后经过的时间（含全局 offset 校准）
+     */
+    currentTime() {
+        return performance.now() - this.startTime;
     }
     
     calculateTotalAcc() {

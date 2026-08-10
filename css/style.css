@@ -923,6 +923,12 @@ body {
     margin-top: 4px;
 }
 
+.settings-hint {
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.35);
+    margin-top: 6px;
+}
+
 /* ============================================================
    结果画面
    ============================================================ */
@@ -1939,4 +1945,104 @@ body {
     }
 
     .result-card { max-width: 480px; }
+}
+/* ============================================================
+   .osz 谱面选择器
+   ============================================================ */
+.osz-picker-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(7, 7, 12, 0.85);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    transition: opacity 0.25s ease;
+}
+
+.osz-picker-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.osz-picker {
+    width: 100%;
+    max-width: 520px;
+    max-height: 82vh;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    animation: fadeScale 0.3s ease;
+}
+
+.osz-picker-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--text-primary);
+}
+
+.osz-picker-sub {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-top: -8px;
+}
+
+.osz-picker-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 80px;
+}
+
+.osz-pick-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.osz-pick-item:hover,
+.osz-pick-item:focus-visible {
+    border-color: var(--accent);
+    background: rgba(77, 171, 247, 0.08);
+    box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.osz-pick-item:active {
+    background: rgba(77, 171, 247, 0.16);
+}
+
+.osz-pick-version {
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.osz-pick-meta {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+.osz-pick-audio {
+    font-size: 0.68rem;
+    color: var(--text-tertiary);
+    word-break: break-all;
 }

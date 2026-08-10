@@ -47,6 +47,8 @@ const CONFIG = {
     
     songListUrl: 'assets/songs/menu.json',
     songBasePath: 'assets/songs/',
+    osuBasePath: 'assets/osu/',
+    mcAudioBasePath: 'assets/mc_audio/',
     
     // 默认音量 (0-10)
     defaultVolume: 4,
@@ -128,23 +130,25 @@ let selectedSongSource = null;
 let selectedLibrarySong = null;
 let loadedMidiData = null;
 let loadedMcData = null;         // MC 谱面解析结果 { notes, meta }
+let loadedOsuData = null;        // osu!mania 谱面解析结果 { notes, meta }
 let importedMidiFileName = null;
+let importedOsuFileName = null;
+let importedMcFileName = null;
 let selectedSongDisplayName = null;
+
+/**
+ * 获取当前加载的谱面数据（.mc 或 .osu，MC 优先）
+ * @returns {Object|null} { notes, meta }
+ */
+function getLoadedChartData() {
+    return loadedMcData || loadedOsuData;
+}
 
 // 当前音量 (0-10)
 let currentVolume = CONFIG.defaultVolume;
 
-// ==================== 应用持久化设置 ====================
-// 在 settings-store.js 加载后，用存储的设置覆盖默认值
-function applyStoredSettings() {
-    if (typeof settingsStore !== 'undefined') {
-        const s = settingsStore.load();
-        if (s.noteSpeed !== undefined) noteSpeed = s.noteSpeed;
-        if (s.volume !== undefined) currentVolume = s.volume;
-        if (s.noteStyle !== undefined) noteStyle = s.noteStyle;
-        if (s.difficulty !== undefined) selectedDifficulty = s.difficulty;
-    }
-}
+// 全局音频延迟校准（ms）：正值使音符更晚到达判定线（相当于判定线相对音乐延后），负值反之
+let audioOffsetMs = 0;
 
 // ==================== 音频配置（从 data/audio.json 加载） ====================
 

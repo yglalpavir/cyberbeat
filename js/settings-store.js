@@ -7,7 +7,8 @@ const DEFAULT_SETTINGS = {
     noteSpeed: 16.0,
     volume: 4,
     noteStyle: 'orb',
-    difficulty: 'normal+'
+    difficulty: 'normal+',
+    audioOffset: 0
 };
 
 class SettingsStore {
@@ -81,6 +82,9 @@ class SettingsStore {
         if (s.difficulty !== undefined) {
             selectedDifficulty = s.difficulty;
         }
+        if (s.audioOffset !== undefined && typeof audioOffsetMs !== 'undefined') {
+            audioOffsetMs = s.audioOffset;
+        }
     }
 
     /**
@@ -92,7 +96,8 @@ class SettingsStore {
             noteSpeed: noteSpeed,
             volume: currentVolume,
             noteStyle: noteStyle,
-            difficulty: selectedDifficulty
+            difficulty: selectedDifficulty,
+            audioOffset: typeof audioOffsetMs !== 'undefined' ? audioOffsetMs : 0
         });
     }
 }

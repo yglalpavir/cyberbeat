@@ -56,16 +56,14 @@ class MidiParser {
                         velocity,
                         duration: 0
                     });
+                } else {
+                    // velocity=0 的 NoteOn 按 NoteOff 处理（MIDI 常见写法）
+                    this._noteOff(note, currentTicks);
                 }
             } else if (messageType === 0x80) { // Note Off
                 const note = this.readUint(1);
                 const velocity = this.readUint(1);
-                for (let i = this.notes.length - 1; i >= 0; i--) {
-                    if (this.notes[i].noteNumber === note && this.notes[i].duration === 0) {
-                        this.notes[i].duration = currentTicks - this.notes[i].ticks;
-                        break;
-                    }
-                }
+                this._noteOff(note, currentTicks);
             } else if (status === 0xFF) { // Meta Event
                 const metaType = this.readUint(1);
                 const length = this.readVarInt();
@@ -89,6 +87,16 @@ class MidiParser {
         }
         
         this.pos = endPos;
+    }
+
+    /** 关闭音高为 note 的音符（从后向前找第一个未结束的） */
+    _noteOff(note, currentTicks) {
+        for (let i = this.notes.length - 1; i >= 0; i--) {
+            if (this.notes[i].noteNumber === note && this.notes[i].duration === 0) {
+                this.notes[i].duration = currentTicks - this.notes[i].ticks;
+                break;
+            }
+        }
     }
     
     convertToSeconds() {

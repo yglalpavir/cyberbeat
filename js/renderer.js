@@ -554,7 +554,8 @@ class Renderer {
         ctx.fillText('SCORE', 30, 30);
         ctx.font = 'bold 28px sans-serif';
         ctx.fillStyle = '#4dabf7';
-        ctx.fillText(Math.round(gameState.judgmentScore).toLocaleString(), 30, 55);
+        // 实时最终分 = 判定分 + 连击分，与结算一致
+        ctx.fillText(gameState.calculateFinalScore().finalScore.toLocaleString(), 30, 55);
 
         const hX = this.canvasWidth - 180;
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
@@ -591,6 +592,37 @@ class Renderer {
         ctx.fillText('ACC:' + acc.toFixed(2) + '%', 30, 125);
 
         ctx.restore();
+    }
+
+    // ========== 暂停遮罩 ==========
+    drawPauseOverlay() {
+        const ctx = this.ctx;
+        const w = this.canvasWidth;
+        const h = this.canvasHeight;
+
+        ctx.fillStyle = 'rgba(5, 5, 12, 0.72)';
+        ctx.fillRect(0, 0, w, h);
+
+        const cx = w / 2;
+        const cy = h / 2;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.beginPath();
+        ctx.roundRect(cx - 190, cy - 90, 380, 180, 16);
+        ctx.fill();
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 44px sans-serif';
+        ctx.fillText('PAUSED', cx, cy - 34);
+
+        ctx.fillStyle = '#9a9ab8';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('ESC / P  继续', cx, cy + 8);
+        ctx.fillText('R  重试', cx, cy + 40);
+        ctx.fillText('H  返回主菜单', cx, cy + 72);
+        ctx.textAlign = 'left';
     }
 
     // ========== 图表 ==========

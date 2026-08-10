@@ -3,7 +3,6 @@
 let renderer;
 let ui;
 let _lastFrameTime = 0;
-let _frameSkipAccum = 0;
 
 async function init() {
     // 加载配置
@@ -57,14 +56,24 @@ function gameLoop(timestamp) {
     const frameDelta = Math.min(rawDelta, 50);
     _lastFrameTime = timestamp;
 
-    // 帧跳过保护：累积过多时直接丢弃（防止螺旋式掉帧）
-    _frameSkipAccum += rawDelta;
-    if (_frameSkipAccum > 100) {
-        _frameSkipAccum = 0;
-        // 跳帧时仍需驱动游戏逻辑时间
+    const now = performance.now();
+
+    // 暂停：冻结场景时间，仅绘制遮罩（不推进、不判定）
+    if (gameState.paused) {
+        const ctx = renderer.ctx;
+        ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
+        renderer.drawBackground(0);
+        renderer.drawTracks();
+        renderer.drawNotes(gameState.pauseSnapshotTime);
+        renderer.drawParticles();
+        renderer.drawJudgments();
+        renderer.drawHUD();
+        renderer.drawPauseOverlay();
+        perfMonitor.endFrame();
+        requestAnimationFrame(gameLoop);
+        return;
     }
 
-    const now = performance.now();
     const countdownRemaining = (gameState.startTime - now) / 1000;
 
     // 倒计时期间
@@ -88,10 +97,13 @@ function gameLoop(timestamp) {
         gameState.intervalStartTime = now;
     }
 
-    // 游戏结束判断
-    const duration = loadedMcData
-        ? loadedMcData.meta.duration * 1000
+    // 游戏结束判断（音频可能比谱面更长，取较大值避免提前结束）
+    const chartData = getLoadedChartData();
+    const chartDuration = chartData
+        ? chartData.meta.duration * 1000
         : (loadedMidiData ? loadedMidiData.duration * 1000 : CONFIG.songDuration);
+    const audioDuration = audioEngine.audioBuffer ? audioEngine.audioBuffer.duration * 1000 : 0;
+    const duration = Math.max(chartDuration, audioDuration);
     if (currentTime > duration + 2000 || gameState.health <= 0) {
         if (ui) ui.endGame();
         perfMonitor.endFrame();

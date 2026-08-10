@@ -14,6 +14,10 @@ class AudioEngine {
         this.audioBuffer = null;
         this.audioSource = null;
         this.audioStartTime = 0;
+        // 暂停支持
+        this._paused = false;
+        this._mode = null;          // 'midi' | 'preset' | 'file'
+        this._pauseStartTime = 0;   // 挂起时 audioContext 的 currentTime
     }
     
     init() {
@@ -146,6 +150,8 @@ class AudioEngine {
         this.init();
         if (this.context.state === 'suspended') this.context.resume();
         this.isPlaying = true;
+        this._paused = false;
+        this._mode = 'preset';
         this.nextNoteTime = this.context.currentTime;
         this.masterGain.disconnect();
         this.masterGain.connect(this.limiter || this.context.destination);
@@ -212,16 +218,22 @@ class AudioEngine {
         this.init();
         if (this.context.state === 'suspended') this.context.resume();
         this.isPlaying = true;
+        this._paused = false;
+        this._mode = 'midi';
         this.midiEvents = events;
+        // 保存完整事件流，供 seek（跳过前奏）时重新注入已消费的事件
+        this._midiAllEvents = events;
         this.midiStartTime = this.context.currentTime;
         this.masterGain.disconnect();
         const reverbCfg = getReverbConfig();
         if (!this.convolver) {
             this.convolver = this.context.createConvolver();
             this.convolver.buffer = this.createReverbImpulse(reverbCfg.duration, reverbCfg.decay, false);
-            // convolver → limiter（混响信号也经过 limiter 保护）
-            this.convolver.connect(this.limiter || this.context.destination);
         }
+        // 确保 convolver 输出有效连接（可能已被 stopMusic 摘除）
+        try { this.convolver.disconnect(); } catch (e) {}
+        // convolver → limiter（混响信号也经过 limiter 保护）
+        this.convolver.connect(this.limiter || this.context.destination);
         // masterGain → limiter / destination（干信号）
         this.masterGain.connect(this.limiter || this.context.destination);
         // masterGain → convolver（混响发送）
@@ -276,11 +288,17 @@ class AudioEngine {
         if (!this.context || !this.audioBuffer) return;
         if (this.context.state === 'suspended') this.context.resume();
         this.isPlaying = true;
+        this._paused = false;
+        this._mode = 'file';
 
         // 确保 masterGain 连接到了音频输出
         try {
             this.masterGain.disconnect();
         } catch (e) { /* 可能未连接 */ }
+        // 摘除可能残留的混响发送（stopMusic 已摘输出，这里兜底）
+        if (this.convolver) {
+            try { this.convolver.disconnect(); } catch (e) {}
+        }
         if (this.limiter) {
             this.masterGain.connect(this.limiter);
             this.limiter.connect(this.context.destination);
@@ -313,10 +331,87 @@ class AudioEngine {
         this.audioBuffer = null;
     }
 
+    // ========== 跳过前奏（时间轴跳转） ==========
+
+    /**
+     * 将音乐时间轴跳转到 sceneMs（毫秒，0 = 音乐起点）
+     * @param {number} sceneMs - 目标场景时间
+     */
+    seekMusic(sceneMs) {
+        if (!this.isPlaying || this._paused) return;
+        const t = Math.max(0, sceneMs) / 1000;
+
+        // 音频文件：重建 source 并从目标位置重新起播
+        if (this._mode === 'file' && this.audioBuffer) {
+            try { this.audioSource.stop(); } catch (e) {}
+            try { this.audioSource.disconnect(); } catch (e) {}
+            this.audioSource = this.context.createBufferSource();
+            this.audioSource.buffer = this.audioBuffer;
+            this.audioSource.connect(this.masterGain);
+            this.audioSource.start(0, t);
+            this.audioStartTime = this.context.currentTime - t;
+            return;
+        }
+
+        // MIDI：平移基准时间，并重新注入已消费的音乐事件
+        if (this._mode === 'midi') {
+            const all = this._midiAllEvents || [];
+            this.midiEvents = all.filter(ev => ev.time >= sceneMs).map(ev => Object.assign({}, ev));
+            this.midiStartTime = this.context.currentTime - t;
+            if (this.midiScheduleTimer) {
+                clearTimeout(this.midiScheduleTimer);
+                this.midiScheduleTimer = null;
+            }
+            this.midiScheduler();
+            return;
+        }
+
+        // preset 节拍器音乐无前奏，无需处理
+    }
+
+    // ========== 暂停 / 恢复 ==========
+
+    /**
+     * 暂停当前播放的所有音乐（Web Audio suspend 冻结所有已调度声音）
+     */
+    pauseMusic() {
+        if (!this.isPlaying || this._paused) return;
+        this._paused = true;
+        if (this._pauseStartTime === 0) this._pauseStartTime = this.context ? this.context.currentTime : 0;
+        if (this.timerID) { clearTimeout(this.timerID); this.timerID = null; }
+        if (this.midiScheduleTimer) { clearTimeout(this.midiScheduleTimer); this.midiScheduleTimer = null; }
+        if (this.context && this.context.state === 'running') {
+            this.context.suspend();
+        }
+    }
+
+    /**
+     * 恢复播放（对齐时间轴，重启对应调度器）
+     */
+    resumeMusic() {
+        if (!this._paused) return;
+        this._paused = false;
+
+        if (this.context) {
+            const pauseDuration = this.context.currentTime - this._pauseStartTime;
+            // MIDI 时间轴整体平移，保证尚未排程的事件仍对齐
+            if (this._mode === 'midi') this.midiStartTime += Math.max(0, pauseDuration);
+            this._pauseStartTime = 0;
+            if (this.context.state === 'suspended') this.context.resume();
+        }
+
+        if (!this.isPlaying) return;
+        if (this._mode === 'preset') this.scheduler();
+        else if (this._mode === 'midi') this.midiScheduler();
+    }
+
     // ========== 停止所有音乐 ==========
 
     stopMusic() {
         this.isPlaying = false;
+        this._paused = false;
+        this._pauseStartTime = 0;
+        this._mode = null;
         if (this.timerID) clearTimeout(this.timerID);
         if (this.midiScheduleTimer) clearTimeout(this.midiScheduleTimer);
         this.stopAudio();
@@ -325,6 +420,10 @@ class AudioEngine {
             if (this.limiter) {
                 try { this.limiter.disconnect(); } catch (e) {}
             }
+        }
+        // 摘除混响输出，避免残留信号继续发声
+        if (this.convolver) {
+            try { this.convolver.disconnect(); } catch (e) {}
         }
     }
     

@@ -9,6 +9,18 @@ class UIManager {
         this._detailRecordId = null;
         this._pendingChartHistory = null;
 
+        // 音乐启动定时器状态（暂停时需要顺延）
+        this._musicStartTimeout = null;
+        this._musicDelayMs = 0;
+        this._musicScheduledAt = 0;
+        this._musicRestartDelay = 0;
+
+        // 排行榜返回来源
+        this._lbOrigin = 'start';
+
+        // 空格双击检测（跳过前奏）
+        this._lastSpaceDownAt = 0;
+
         // 应用持久化设置到运行时变量
         if (typeof settingsStore !== 'undefined') {
             settingsStore.applyToRuntime();
@@ -27,6 +39,9 @@ class UIManager {
         this.setVolume(currentVolume);
         if (this.volumeSlider) this.volumeSlider.value = currentVolume;
         if (this.volumeValue) this.volumeValue.textContent = currentVolume + '/10';
+
+        // 初始化全局偏移（ms）- 使用持久化的偏移值
+        this.setAudioOffset(audioOffsetMs, /* updateUI */ true);
     }
 
     // ========== DOM 缓存 ==========
@@ -57,6 +72,8 @@ class UIManager {
         // 导入
         this.importMidiCard = document.getElementById('importMidiCard');
         this.midiUpload     = document.getElementById('midiUpload');
+        this.importOsuCard  = document.getElementById('importOsuCard');
+        this.osuUpload      = document.getElementById('osuUpload');
 
         // 按钮
         this.startBtn         = document.getElementById('startBtn');
@@ -77,6 +94,10 @@ class UIManager {
         // 音量
         this.volumeSlider = document.getElementById('volumeSlider');
         this.volumeValue  = document.getElementById('volumeValue');
+
+        // 全局偏移
+        this.offsetSlider = document.getElementById('offsetSlider');
+        this.offsetValue  = document.getElementById('offsetValue');
 
         // 结果面板
         this.rankDisplay    = document.getElementById('rankDisplay');
@@ -108,6 +129,11 @@ class UIManager {
         this.lbImportFile     = document.getElementById('lbImportFile');
         this.lbDetailClose    = document.getElementById('lbDetailClose');
         this.lbDetailDelete   = document.getElementById('lbDetailDelete');
+
+        // .osz 谱面选择器
+        this.oszPicker       = document.getElementById('oszPicker');
+        this.oszPickerList   = document.getElementById('oszPickerList');
+        this.oszPickerCancel = document.getElementById('oszPickerCancel');
     }
 
     // ========== 事件绑定 ==========
@@ -184,11 +210,41 @@ class UIManager {
         });
         this.midiUpload.addEventListener('change', (e) => this.handleMidiImport(e));
 
+        // 导入 .osu / .osz 卡片点击 → 触发 file input
+        if (this.importOsuCard && this.osuUpload) {
+            this.importOsuCard.addEventListener('click', (e) => {
+                if (e.target !== this.osuUpload) {
+                    this.osuUpload.click();
+                }
+            });
+            this.osuUpload.addEventListener('change', (e) => this.handleOsuImport(e));
+        }
+
+        // .osz 谱面选择器
+        if (this.oszPickerCancel) {
+            this.oszPickerCancel.addEventListener('click', () => this.hideOszPicker());
+        }
+        if (this.oszPickerList) {
+            this.oszPickerList.addEventListener('click', (e) => {
+                const item = e.target.closest('.osz-pick-item');
+                if (item && item.dataset.index !== undefined) {
+                    this.applyOszCandidate(parseInt(item.dataset.index));
+                }
+            });
+        }
+
         // 音量滑块
         if (this.volumeSlider) {
             this.volumeSlider.addEventListener('input', () => {
                 const vol = parseInt(this.volumeSlider.value);
                 this.setVolume(vol);
+            });
+        }
+
+        // 全局偏移滑块
+        if (this.offsetSlider) {
+            this.offsetSlider.addEventListener('input', () => {
+                this.setAudioOffset(parseInt(this.offsetSlider.value));
             });
         }
 
@@ -219,24 +275,31 @@ class UIManager {
     }
 
     /**
-     * 从 songLibrary 中筛选 MIDI 歌曲（beatmapType 不是 "mc" 的，包括 .mid）
+     * 判断是否为谱面类歌曲（.mc / .osu，谱面固定，不生成谱面）
      */
-    _getMidiSongs() {
-        return songLibrary.filter(s => !s.beatmapType || s.beatmapType !== 'mc');
+    _isChartSong(song) {
+        return !!song && (song.beatmapType === 'mc' || song.beatmapType === 'osu');
     }
 
     /**
-     * 从 songLibrary 中筛选 MC 谱面歌曲（beatmapType === 'mc'）
+     * 从 songLibrary 中筛选 MIDI 歌曲（beatmapType 不是 "mc" / "osu" 的，包括 .mid）
      */
-    _getMcSongs() {
-        return songLibrary.filter(s => s.beatmapType === 'mc');
+    _getMidiSongs() {
+        return songLibrary.filter(s => !this._isChartSong(s));
+    }
+
+    /**
+     * 从 songLibrary 中筛选谱面歌曲（.mc / .osu）
+     */
+    _getChartSongs() {
+        return songLibrary.filter(s => this._isChartSong(s));
     }
 
     renderSongList() {
         if (!this.songCardsMidi || !this.songCardsSongs) return;
 
         const midiSongs = this._getMidiSongs();
-        const mcSongs = this._getMcSongs();
+        const chartSongs = this._getChartSongs();
 
         // 更新计数（显示当前活跃标签页的曲目数）
         this._updateTabCount();
@@ -256,18 +319,43 @@ class UIManager {
 
         // --- SONGS 标签页 ---
         this.songCardsSongs.innerHTML = '';
-        if (mcSongs.length === 0) {
+        const hasOsuImport = selectedSongSource === 'import' &&
+            (loadedOsuData || loadedMcData || importedOsuFileName || importedMcFileName);
+        if (chartSongs.length === 0 && !hasOsuImport) {
             if (this.songEmptySongs) this.songEmptySongs.style.display = 'flex';
         } else {
             if (this.songEmptySongs) this.songEmptySongs.style.display = 'none';
-            mcSongs.forEach((song) => {
+            chartSongs.forEach((song) => {
                 const realIndex = songLibrary.indexOf(song);
                 const card = this.createSongCard(song, realIndex);
                 this.songCardsSongs.appendChild(card);
             });
+            // 导入的 .osu / .osz 谱面：显示为合成卡片，避免切标签丢失选择
+            if (hasOsuImport) {
+                const card = this.createImportedOsuCard();
+                this.songCardsSongs.appendChild(card);
+            }
         }
 
         this.updateAllHighlights();
+    }
+
+    /** 生成「已导入 .osu/.osz/.mc」合成卡片 */
+    createImportedOsuCard() {
+        const card = document.createElement('div');
+        card.className = 'song-card import-card selected';
+        const isMc = !!(loadedMcData || importedMcFileName);
+        card.innerHTML = `
+            <div class="card-body">
+                <div class="card-icon">▣</div>
+                <div class="card-info">
+                    <span class="card-title import-title">${isMc ? 'IMPORTED .MC (.OSZ)' : 'IMPORTED .OSU/.OSZ'}</span>
+                    <span class="card-sub">${this.escapeHTML(selectedSongDisplayName || '')}</span>
+                </div>
+                <div class="card-arrow">→</div>
+            </div>
+        `;
+        return card;
     }
 
     /**
@@ -288,16 +376,15 @@ class UIManager {
         // 更新计数
         this._updateTabCount();
 
-        // 如果当前选中的歌曲不在活跃标签页中，清除选中
+        // 如果当前选中的曲库歌曲不在活跃标签页中，清除选中
         if (selectedSongSource === 'library' && selectedLibrarySong) {
-            const isMcSelected = selectedLibrarySong.beatmapType === 'mc';
-            if ((tab === 'midi' && isMcSelected) || (tab === 'songs' && !isMcSelected)) {
+            const isChartSelected = this._isChartSong(selectedLibrarySong);
+            if ((tab === 'midi' && isChartSelected) || (tab === 'songs' && !isChartSelected)) {
                 this.clearSelection();
             }
         }
-        if (selectedSongSource === 'import' && tab === 'songs') {
-            this.clearSelection();
-        }
+        // 重新渲染当前标签内容（导入的 osu 谱面在 SONGS 标签显示为合成卡片）
+        this.renderSongList();
     }
 
     /**
@@ -305,8 +392,8 @@ class UIManager {
      */
     _updateTabCount() {
         const midiSongs = this._getMidiSongs();
-        const mcSongs = this._getMcSongs();
-        const count = this.activeTab === 'midi' ? midiSongs.length : mcSongs.length;
+        const chartSongs = this._getChartSongs();
+        const count = this.activeTab === 'midi' ? midiSongs.length : chartSongs.length;
         this.songCount.textContent = `${count} TRACKS`;
     }
 
@@ -320,7 +407,7 @@ class UIManager {
 
         card.innerHTML = `
             <div class="card-body">
-                <div class="card-icon">🎵</div>
+                <div class="card-icon">♪</div>
                 <div class="card-info">
                     <span class="card-title">${this.escapeHTML(song.title || 'Unknown')}</span>
                     <span class="card-sub">${this.escapeHTML(song.artist || 'Unknown Artist')}</span>
@@ -406,7 +493,10 @@ class UIManager {
         selectedLibrarySong = song;
         loadedMidiData = null;
         loadedMcData = null;
+        loadedOsuData = null;
         importedMidiFileName = null;
+        importedOsuFileName = null;
+        importedMcFileName = null;
         selectedSongDisplayName = song.title;
 
         this.updateSelectionDisplay();
@@ -419,6 +509,8 @@ class UIManager {
         if (!file) return;
 
         importedMidiFileName = file.name;
+        importedOsuFileName = null;
+        importedMcFileName = null;
 
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -426,6 +518,7 @@ class UIManager {
                 const parser = new MidiParser(e.target.result);
                 loadedMidiData = parser.parse();
                 loadedMcData = null;
+                loadedOsuData = null;
 
                 selectedSongSource = 'import';
                 selectedLibrarySong = null;
@@ -454,27 +547,390 @@ class UIManager {
         reader.readAsArrayBuffer(file);
     }
 
-    clearSelection() {
-        selectedSongSource = null;
-        selectedLibrarySong = null;
-        loadedMidiData = null;
+    /**
+     * 处理 .osu / .osz 文件导入
+     * - .osu：直接解析文本谱面（无音频时回退到预设音乐）
+     * - .osz：解压并选择第一个合法的 osu!mania 4K 谱面，同时加载其音频
+     */
+    async handleOsuImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const ext = file.name.split('.').pop().toLowerCase();
+        try {
+            if (ext === 'osu') {
+                await this._importOsuFile(file);
+            } else if (ext === 'osz') {
+                await this._importOszFile(file);
+            } else {
+                alert('Unsupported file type. Please select a .osu or .osz file.');
+            }
+        } catch (err) {
+            console.error('osu! import error:', err);
+            alert(`Failed to import osu! beatmap.\n\n${err.message}`);
+            this.clearSelection();
+        } finally {
+            event.target.value = ''; // 允许重新选择相同文件
+        }
+    }
+
+    /**
+     * 导入单个 .osu 文件
+     */
+    _importOsuFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const parser = new OsuParser(e.target.result);
+                    const result = parser.parse();
+                    this._applyImportedOsu(result, file.name);
+                    // 无音频：清空残留的音频缓冲，回退到预设音乐
+                    audioEngine.stopAudio();
+                    resolve();
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            reader.onerror = () => reject(new Error('Failed to read file.'));
+            reader.readAsText(file, 'utf-8');
+        });
+    }
+
+    /**
+     * 导入 .osz 压缩包：枚举全部可玩谱面（osu!mania 4K + Malody .mc 4K）
+     * - 只有一个谱面：直接导入
+     * - 多个谱面：弹出选择器让用户挑选
+     */
+    async _importOszFile(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const zip = new OsZipReader(arrayBuffer);
+        const osuEntries = zip.listOsuEntries();
+        const mcEntries = zip.listMcEntries();
+        if (osuEntries.length === 0 && mcEntries.length === 0) {
+            throw new Error('No .osu or .mc beatmap found in this .osz file.');
+        }
+
+        // 解析全部候选（跳过解析失败 / 非 4K / 无音符的条目）
+        const candidates = [];
+        const allEntries = [
+            ...osuEntries.map(e => ({ entry: e, kind: 'osu' })),
+            ...mcEntries.map(e => ({ entry: e, kind: 'mc' }))
+        ];
+        for (const cand of allEntries) {
+            try {
+                const text = await zip.readText(cand.entry);
+                let parsed;
+                if (cand.kind === 'osu') {
+                    parsed = new OsuParser(text).parse();
+                } else {
+                    const clean = text.replace(/^\uFEFF/, '');
+                    parsed = new McParser(JSON.parse(clean)).parse();
+                }
+                if (parsed.notes.length > 0) {
+                    candidates.push({ kind: cand.kind, entry: cand.entry, parsed: parsed });
+                }
+            } catch (err) {
+                console.warn('Skip unplayable entry:', cand.entry.name, '-', err.message.split('\n')[0]);
+            }
+        }
+
+        if (candidates.length === 0) {
+            throw new Error(
+                'No playable 4K beatmap (osu!mania or Malody) found in this .osz file.\n\n' +
+                'CyberBeat only supports 4K keycount beatmaps.'
+            );
+        }
+
+        // 按难度标签排序展示（如 Regular-5 → Regular-10；无数字尾缀排最后）
+        candidates.sort((a, b) => this.oszDifficultyRank(a.parsed) - this.oszDifficultyRank(b.parsed));
+
+        this._oszZip = zip;
+        this._oszCandidates = candidates;
+        this._oszAssignAudio(candidates);
+
+        if (candidates.length === 1) {
+            this.applyOszCandidate(0);
+        } else {
+            this.showOszPicker(candidates);
+        }
+    }
+
+    /** 提取谱面难度排序键：优先 "Reg-N"/"Regular-N" 编号，其次版本尾数，其余保持原顺序 */
+    oszDifficultyRank(parsed) {
+        const version = String(parsed.meta.version || '').trim();
+        const m = version.match(/(?:reg(?:ular)?[-_\s]+)(\d+)/i);
+        if (m) return Number(m[1]);
+        const tail = version.match(/(\d+(?:\.\d+)?)\s*$/);
+        if (tail) return Number(tail[1]);
+        return Number.MAX_SAFE_INTEGER;
+    }
+
+    /**
+     * 包级音频分配：先按条目规则配对，剩余未配对者
+     * 仅当「恰好剩一个」且包内有唯一的 audio* 通用文件时，才把它留给这一个谱面
+     */
+    _oszAssignAudio(candidates) {
+        for (const c of candidates) {
+            c.audioEntry = this.oszPickAudioEntry(c);
+        }
+        const unmatched = candidates.filter(c => !c.audioEntry && c.kind === 'mc');
+        if (unmatched.length === 1) {
+            const zip = this._oszZip;
+            if (zip) {
+                const baseOf = (name) => name.replace(/\\/g, '/').split('/').pop().toLowerCase();
+                const generic = zip.entries
+                    .filter(e => /\.(ogg|mp3|wav|m4a)$/i.test(e.name))
+                    .filter(a => baseOf(a.name).startsWith('audio'));
+                if (generic.length === 1) unmatched[0].audioEntry = generic[0];
+            }
+        }
+    }
+
+    /** 弹出谱面选择器 */
+    showOszPicker(candidates) {
+        if (!this.oszPicker || !this.oszPickerList) return;
+        this.oszPickerList.textContent = '';
+
+        for (let i = 0; i < candidates.length; i++) {
+            const c = candidates[i];
+            const meta = c.parsed.meta;
+            const audioEntry = c.audioEntry;
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'osz-pick-item';
+            btn.dataset.index = String(i);
+
+            const versionEl = document.createElement('span');
+            versionEl.className = 'osz-pick-version';
+            versionEl.textContent =
+                (c.kind === 'osu' ? 'osu!mania :: ' : 'Malody :: ') +
+                (meta.version || meta.title || c.entry.name.split('/').pop());
+
+            const metaEl = document.createElement('span');
+            metaEl.className = 'osz-pick-meta';
+            metaEl.textContent =
+                (meta.title || 'Unknown') + ' — ' + (meta.artist || '') + ' · ' +
+                (meta.column || 4) + 'K · ' + c.parsed.notes.length.toLocaleString() + ' NOTES';
+
+            const audioEl = document.createElement('span');
+            audioEl.className = 'osz-pick-audio';
+            audioEl.textContent = audioEntry
+                ? '♪ ' + audioEntry.name.split('/').pop()
+                : '♪ no audio found in pack — preset music will be used';
+
+            btn.append(versionEl, metaEl, audioEl);
+            this.oszPickerList.appendChild(btn);
+        }
+
+        this.oszPicker.classList.remove('hidden');
+    }
+
+    /** 应用选择器中的某个候选谱面 */
+    applyOszCandidate(index) {
+        const c = (this._oszCandidates || [])[index];
+        if (!c) return;
+        const zip = this._oszZip;
+        this.hideOszPicker();
+
+        try {
+            if (c.kind === 'osu') {
+                this._applyImportedOsu(c.parsed, c.entry.name);
+            } else {
+                this._applyImportedMc(c.parsed, c.entry.name);
+            }
+
+            // 加载配套音频；找不到则停止旧音频（回退预设音乐）
+            const audioEntry = c.audioEntry;
+            if (audioEntry) {
+                this._loadOszAudio(zip, audioEntry).catch(err => {
+                    console.warn('Failed to load osz audio:', err);
+                    audioEngine.stopAudio();
+                });
+            } else {
+                audioEngine.stopAudio();
+            }
+        } catch (err) {
+            console.error('Apply osz candidate error:', err);
+            alert('Failed to apply beatmap.\n\n' + err.message);
+            this.clearSelection();
+        }
+    }
+
+    /** 关闭谱面选择器 */
+    hideOszPicker() {
+        if (this.oszPicker) this.oszPicker.classList.add('hidden');
+        this._oszZip = null;
+        this._oszCandidates = null;
+    }
+
+    /** 为候选谱面挑选配套音频条目（不含通用 fallback；包级处理见 _oszAssignAudio） */
+    oszPickAudioEntry(c) {
+        const zip = this._oszZip;
+        if (!zip) return null;
+
+        if (c.kind === 'osu') {
+            // .osu：AudioFilename 指定（osu-zip 内已做大小写不敏感匹配）
+            return c.parsed.meta.audioFile ? zip.findEntry(c.parsed.meta.audioFile) : null;
+        }
+
+        // Malody .mc：音频是包内独立文件，按以下优先级配对
+        const audioEntries = zip.entries.filter(e => /\.(ogg|mp3|wav|m4a)$/i.test(e.name));
+        if (audioEntries.length === 0) return null;
+
+        const baseOf = (name) => name.replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '').toLowerCase();
+
+        // 1) 同名（.mc 与音频共用时间戳/文件名）
+        const mcBase = baseOf(c.entry.name);
+        const sameName = audioEntries.find(a => baseOf(a.name) === mcBase);
+        if (sameName) return sameName;
+
+        // 2) 曲名关键词匹配（title/version 中的有效词语）
+        const keywords = this.mcAudioKeywords(c.parsed);
+        if (keywords.length > 0) {
+            let best = null;
+            let bestScore = 0;
+            for (const a of audioEntries) {
+                const base = baseOf(a.name);
+                let score = 0;
+                for (const kw of keywords) {
+                    if (base.includes(kw)) score++;
+                }
+                if (score > bestScore) {
+                    best = a;
+                    bestScore = score;
+                }
+            }
+            if (best && bestScore > 0) return best;
+        }
+
+        // 3) 版本速度数字匹配（如 "(1.05x)" ↔ "audio 1.050x (pitch raised).ogg"、"0.95x" ↔ "audio95.ogg"）
+        const speedMatch = String(c.parsed.meta.version || '').match(/\((\d+(?:\.\d+)?)x?\)/i);
+        if (speedMatch && Number(speedMatch[1]) > 0) {
+            const full = String(Number(speedMatch[1]));
+            const frac = speedMatch[1].split('.')[1];
+            const nums = frac && frac.length >= 2 && frac !== full ? [full, frac] : [full];
+            for (const num of nums) {
+                const hit = audioEntries.find(a => baseOf(a.name).includes(num));
+                if (hit) return hit;
+            }
+        }
+
+        return null;
+    }
+
+    /** 从 .mc 的 title/version 提取音频匹配关键词（去掉序号、通用词） */
+    mcAudioKeywords(parsed) {
+        const raw = String((parsed.meta.title || '') + ' ' + (parsed.meta.version || ''));
+        const stop = new Set([
+            'reg', 'dan', 'pack', 'part', 'the', 'of', 'and', 'mix', 'extended',
+            'remix', 'pitch', 'raised', 'audio', 'speed', 'ver', 'section', 'mini', 'jack',
+            'in', 'at', 'to', 'on', 'it', 'or', 'from', 'feat', 'with', 'for'
+        ]);
+        const seen = new Set();
+        const words = raw.toLowerCase()
+            .replace(/[()\[\]{}<>'"]/g, ' ')
+            .replace(/[-_]+/g, ' ')
+            .split(/\s+/)
+            .map(w => w.replace(/^\d+\.?\d*x?\s*/, '').replace(/^\d+$/, ''));
+
+        const out = [];
+        for (const w of words) {
+            if (w.length < 2) continue;
+            if (stop.has(w)) continue;
+            if (/^[ivx]+$/.test(w)) continue;   // I/II/III 等序号
+            if (!seen.has(w)) {
+                seen.add(w);
+                out.push(w);
+            }
+        }
+        return out;
+    }
+
+    /** 从 .osz 中读取音频并送入音频引擎 */
+    async _loadOszAudio(zip, audioEntry) {
+        const blob = await zip.readBlob(audioEntry);
+        // 释放上一次导入的音频 URL
+        if (this._importedOsuAudioUrl) {
+            URL.revokeObjectURL(this._importedOsuAudioUrl);
+        }
+        this._importedOsuAudioUrl = URL.createObjectURL(blob);
+        await audioEngine.loadAudioFile(this._importedOsuAudioUrl);
+    }
+
+    /**
+     * 应用导入的 osu! 谱面到全局状态
+     */
+    _applyImportedOsu(parsed, displayName) {
+        loadedOsuData = parsed;
         loadedMcData = null;
+        loadedMidiData = null;
+
+        importedOsuFileName = displayName.replace(/\.osu$/i, '');
         importedMidiFileName = null;
-        selectedSongDisplayName = null;
+
+        selectedSongSource = 'import';
+        selectedLibrarySong = null;
+        selectedSongDisplayName =
+            (parsed.meta.title || importedOsuFileName) +
+            (parsed.meta.version ? ' [' + parsed.meta.version + ']' : '');
 
         this.updateSelectionDisplay();
         this.updateAllHighlights();
         this.updateStartButtons();
     }
 
+    /**
+     * 应用导入的 Malody .mc 谱面到全局状态
+     */
+    _applyImportedMc(parsed, displayName) {
+        loadedOsuData = null;
+        loadedMcData = parsed;
+        loadedMidiData = null;
+
+        importedMcFileName = displayName.replace(/\.mc$/i, '');
+        importedOsuFileName = null;
+        importedMidiFileName = null;
+
+        selectedSongSource = 'import';
+        selectedLibrarySong = null;
+        selectedSongDisplayName =
+            (parsed.meta.title || importedMcFileName) +
+            (parsed.meta.version ? ' [' + parsed.meta.version + ']' : '');
+
+        this.updateSelectionDisplay();
+        this.updateAllHighlights();
+        this.updateStartButtons();
+    }
+
+    clearSelection() {
+        selectedSongSource = null;
+        selectedLibrarySong = null;
+        loadedMidiData = null;
+        loadedMcData = null;
+        loadedOsuData = null;
+        importedMidiFileName = null;
+        importedOsuFileName = null;
+        importedMcFileName = null;
+        selectedSongDisplayName = null;
+
+        this.updateSelectionDisplay();
+        this.updateAllHighlights();
+        this.updateStartButtons();
+        // 重新渲染，清理可能残留的「导入 osu」合成卡片
+        this.renderSongList();
+    }
+
     updateSelectionDisplay() {
+        const importName = importedOsuFileName || importedMcFileName || importedMidiFileName;
         if (selectedSongSource === 'library' && selectedLibrarySong) {
             this.selectedSongName.textContent = selectedLibrarySong.title;
             this.selectedSongName.style.color = 'var(--accent)';
             this.selectedSongSourceEl.textContent = 'LIBRARY';
             this.selectedSongSourceEl.style.color = '';
-        } else if (selectedSongSource === 'import' && importedMidiFileName) {
-            this.selectedSongName.textContent = importedMidiFileName;
+        } else if (selectedSongSource === 'import' && importName) {
+            this.selectedSongName.textContent = importName;
             this.selectedSongName.style.color = 'var(--orange)';
             this.selectedSongSourceEl.textContent = 'IMPORTED';
             this.selectedSongSourceEl.style.color = 'var(--orange)';
@@ -510,29 +966,39 @@ class UIManager {
     async handleStartOrConfig() {
         if (!selectedSongSource) return;
 
-        // 如果选中的是曲库歌曲，需要先加载音频
+        // 如果选中的是曲库歌曲，需要先加载谱面和音频
         if (selectedSongSource === 'library' && selectedLibrarySong) {
-            // 先加载 MC beatmap（如果有）
+            // 先加载谱面（.mc 或 .osu，如果有）
             if (selectedLibrarySong.beatmapType === 'mc') {
                 const mcLoaded = await this.loadLibraryMcBeatmap();
                 if (!mcLoaded) return;
+            } else if (selectedLibrarySong.beatmapType === 'osu') {
+                const osuLoaded = await this.loadLibraryOsuBeatmap();
+                if (!osuLoaded) return;
             }
 
-            // 加载音频：MC 歌曲使用 audio 字段 + mc_audio 路径，MIDI 歌曲使用 file 字段 + songs 路径
+            // 加载音频：谱面歌曲（mc/osu）使用 audio 字段 + 对应目录，MIDI 使用 file 字段 + songs 路径
             const song = selectedLibrarySong;
-            const isMc = song.beatmapType === 'mc';
-            const audioFile = isMc ? song.audio : song.file;
+            const isChart = this._isChartSong(song);
+            const audioFile = isChart ? song.audio : song.file;
 
             if (audioFile) {
-                const basePath = isMc ? 'assets/mc_audio/' : CONFIG.songBasePath;
+                let basePath;
+                if (song.beatmapType === 'osu') {
+                    basePath = CONFIG.osuBasePath + (song.folder ? song.folder + '/' : '');
+                } else if (song.beatmapType === 'mc') {
+                    basePath = CONFIG.mcAudioBasePath;
+                } else {
+                    basePath = CONFIG.songBasePath;
+                }
                 const loaded = await this.loadAudioForSong(audioFile, basePath, song);
-                if (!loaded && !isMc) return;  // MIDI 必须加载成功
-                // MC 允许音频加载失败（回退到预设音乐）
+                if (!loaded && !isChart) return;  // MIDI 必须加载成功
+                // 谱面歌曲允许音频加载失败（回退到预设音乐）
             }
         }
 
-        // MC 模式允许没有 MIDI（使用预设音乐），但至少要有 MC 数据
-        if (!loadedMidiData && !loadedMcData) {
+        // 谱面/导入模式允许没有 MIDI（使用预设音乐），但至少要有谱面数据
+        if (!loadedMidiData && !getLoadedChartData()) {
             alert('No beatmap data available. Please select a song or import a MIDI file.');
             return;
         }
@@ -647,15 +1113,67 @@ class UIManager {
         }
     }
 
+    /**
+     * 加载曲库中的 osu!mania .osu 谱面（assets/osu/<folder>/<file>）
+     * @returns {Promise<boolean>}
+     */
+    async loadLibraryOsuBeatmap() {
+        const song = selectedLibrarySong;
+        const filePath = CONFIG.osuBasePath + (song.folder ? song.folder + '/' : '') + song.file;
+
+        try {
+            const response = await fetch(filePath);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const text = await response.text();
+            const parser = new OsuParser(text);
+            loadedOsuData = parser.parse();
+            loadedMcData = null;
+
+            // 用 .osu 文件中的元数据更新 song 信息
+            if (loadedOsuData && loadedOsuData.meta) {
+                const meta = loadedOsuData.meta;
+                song.bpm = meta.bpm || song.bpm;
+                song.duration = formatDuration(meta.duration);
+                if (!song.title || song.title === 'Unknown') {
+                    song.title = meta.title;
+                }
+                if (!song.artist || song.artist === 'Unknown Artist') {
+                    song.artist = meta.artist;
+                }
+                // 若 menu.json 未指定音频，使用谱面内 AudioFilename
+                if (!song.audio && meta.audioFile) {
+                    song.audio = meta.audioFile;
+                }
+            }
+
+            console.log(
+                'osu! beatmap loaded:', loadedOsuData.meta,
+                `${loadedOsuData.notes.length} notes`
+            );
+            return true;
+        } catch (err) {
+            console.error('Failed to load osu! beatmap:', err);
+            alert(
+                `Failed to load beatmap for: ${song.title}\n\n` +
+                `Error: ${err.message}\n\n` +
+                `Please check that the .osu file exists at:\n${filePath}`
+            );
+            loadedOsuData = null;
+            return false;
+        }
+    }
+
     showSettings() {
         if (!selectedSongSource) return;
 
         // 更新设置面板的歌曲信息
+        const importName = importedOsuFileName || importedMidiFileName;
         if (selectedSongSource === 'library' && selectedLibrarySong) {
             this.settingsSongTitle.textContent = selectedLibrarySong.title;
             this.settingsSongArtist.textContent = selectedLibrarySong.artist || '';
         } else if (selectedSongSource === 'import') {
-            this.settingsSongTitle.textContent = importedMidiFileName || 'Imported MIDI';
+            this.settingsSongTitle.textContent = importName || 'Imported MIDI';
             this.settingsSongArtist.textContent = 'Custom Import';
         }
 
@@ -663,12 +1181,13 @@ class UIManager {
         let bpmText = '';
         let durText = '';
 
-        if (loadedMcData && loadedMcData.meta) {
-            // MC 谱面：使用 MC 元数据
-            bpmText = `BPM ${loadedMcData.meta.bpm}`;
-            durText = formatDuration(loadedMcData.meta.duration);
-            if (loadedMcData.meta.version) {
-                bpmText += `  •  ${loadedMcData.meta.version}`;
+        const chartData = getLoadedChartData();
+        if (chartData && chartData.meta) {
+            // 谱面（.mc / .osu）：使用谱面元数据
+            bpmText = `BPM ${chartData.meta.bpm}`;
+            durText = formatDuration(chartData.meta.duration);
+            if (chartData.meta.version) {
+                bpmText += `  •  ${chartData.meta.version}`;
             }
         } else if (loadedMidiData) {
             // MIDI：使用 MIDI 计算的 BPM 和时长
@@ -680,14 +1199,14 @@ class UIManager {
 
         this.settingsSongMeta.textContent = [bpmText, durText].filter(Boolean).join('  •  ');
 
-        // MC 谱面不显示难度选择（谱面固定，难度无影响）
-        const isMc = selectedLibrarySong?.beatmapType === 'mc';
+        // 谱面（.mc / .osu，含导入的 osu）不显示难度选择（谱面固定，难度无影响）
+        const isChart = !!getLoadedChartData();
         if (this.difficultyGroup) {
-            this.difficultyGroup.style.display = isMc ? 'none' : '';
+            this.difficultyGroup.style.display = isChart ? 'none' : '';
         }
 
         // 根据歌曲的 difficulties 字段过滤难度按钮
-        if (!isMc) {
+        if (!isChart) {
             this.filterDifficultyButtons();
         }
 
@@ -706,7 +1225,7 @@ class UIManager {
     filterDifficultyButtons() {
         let allowedKeys = null;
 
-        if (selectedLibrarySong?.beatmapType === 'mc') {
+        if (this._isChartSong(selectedLibrarySong)) {
             allowedKeys = null;
         } else if (selectedSongSource === 'library' && selectedLibrarySong
             && Array.isArray(selectedLibrarySong.difficulties) && selectedLibrarySong.difficulties.length > 0) {
@@ -754,11 +1273,19 @@ class UIManager {
             return;
         }
 
-        const isMcMode = loadedMcData && selectedLibrarySong?.beatmapType === 'mc';
+        const chartData = getLoadedChartData();
+        const isChartMode = !!chartData;
 
-        if (!loadedMidiData && !isMcMode) {
-            alert('No MIDI data loaded. Please select a song or import a MIDI file first.');
+        if (!loadedMidiData && !isChartMode) {
+            alert('No beatmap data loaded. Please select a song or import a beatmap first.');
             return;
+        }
+
+        // 停止一切残留播放（结算音乐/上一局音乐），并清掉可能挂起的启动定时器
+        audioEngine.stopMusic();
+        if (this._musicStartTimeout) {
+            clearTimeout(this._musicStartTimeout);
+            this._musicStartTimeout = null;
         }
 
         // 隐藏所有 UI
@@ -766,11 +1293,22 @@ class UIManager {
         this.settingsScreen.classList.add('hidden');
         this.resultScreen.classList.add('hidden');
 
-        // 生成谱面：优先使用 MC 谱面，否则用 MIDI 算法生成
+        // 生成谱面：优先使用谱面（.mc / .osu），否则用 MIDI 算法生成
+        // 谱面音符深拷贝：清除上一局的 hit/missed/holdActive 等运行时状态，保证 RETRY 正确
         let notes;
-        if (isMcMode) {
-            notes = loadedMcData.notes;
-            console.log(`Using MC beatmap: ${notes.length} notes`);
+        if (isChartMode) {
+            notes = chartData.notes.map(n => ({
+                track: n.track,
+                time: n.time,
+                y: -50,
+                hit: false,
+                missed: false,
+                type: n.type,
+                endTime: n.endTime !== undefined ? n.endTime : null,
+                holdActive: false,
+                holdReleased: false
+            }));
+            console.log(`Using beatmap (${chartData.meta.version || 'chart'}): ${notes.length} notes`);
         } else {
             notes = generateMidiBeatmap(loadedMidiData, selectedDifficulty);
             console.log(`Using MIDI-generated beatmap: ${notes.length} notes`);
@@ -783,29 +1321,27 @@ class UIManager {
         if (renderer) renderer.resetPools();
 
         // 设置未来时间实现倒计时（谱面时间从倒计时结束时开始计算）
+        // 全局偏移：正值使音符更晚到达判定线，负值反之
         const countdownMs = CONFIG.countdownDuration;
-        gameState.startTime = performance.now() + countdownMs;
+        gameState.startTime = performance.now() + countdownMs + audioOffsetMs;
 
-        // 手动设置游戏状态（不使用 initForGame 以兼容倒计时）
+        // 手动设置游戏状态（倒计时通过 startTime 指向未来实现）
         gameState.screen = 'game';
         gameState.notes = notes;
         gameState.totalNotes = notes.length;
         gameState.isPlaying = true;
-        gameState.intervalStartTime = performance.now() + countdownMs;
+        gameState.intervalStartTime = performance.now() + countdownMs + audioOffsetMs;
 
         // 计算音频偏移（MC 谱面的 sound offset，单位 ms）
-        const audioOffset = (loadedMcData?.meta?.audioOffset) || 0;
+        const audioOffset = (getLoadedChartData()?.meta?.audioOffset) || 0;
 
-        // 延迟启动音乐（倒计时 + 音频偏移）
-        setTimeout(() => {
-            if (loadedMidiData) {
-                audioEngine.startMidiMusic([...loadedMidiData.events]);
-            } else if (audioEngine.audioBuffer) {
-                audioEngine.startAudioPlayback(audioOffset / 1000);
-            } else {
-                CONFIG.bpm = loadedMcData?.meta?.bpm || 120;
-                audioEngine.startPresetMusic();
-            }
+        // 延迟启动音乐（倒计时 + 音频偏移）；记录调度信息以便暂停时顺延
+        this._musicDelayMs = countdownMs;
+        this._musicScheduledAt = performance.now();
+        this._musicRestartDelay = 0;
+        this._musicStartTimeout = setTimeout(() => {
+            this._musicStartTimeout = null;
+            this._playGameMusic(audioOffset);
         }, countdownMs);
 
         // 确保 Canvas 尺寸正确
@@ -817,9 +1353,27 @@ class UIManager {
         requestAnimationFrame(gameLoop);
     }
 
+    /** 按当前加载的数据启动游戏音乐（供倒计时结束或暂停恢复时调用） */
+    _playGameMusic(audioOffset) {
+        if (loadedMidiData) {
+            audioEngine.startMidiMusic([...loadedMidiData.events]);
+        } else if (audioEngine.audioBuffer) {
+            audioEngine.startAudioPlayback(audioOffset / 1000);
+        } else {
+            CONFIG.bpm = getLoadedChartData()?.meta?.bpm || 120;
+            audioEngine.startPresetMusic();
+        }
+    }
+
     endGame() {
         gameState.screen = 'result';
         gameState.isPlaying = false;
+        gameState.paused = false;
+        // 清除可能挂起的启动音乐定时器（防止结算后音乐再响起）
+        if (this._musicStartTimeout) {
+            clearTimeout(this._musicStartTimeout);
+            this._musicStartTimeout = null;
+        }
         audioEngine.stopMusic();
         gameState.recordIntervalStats();
         // 清除所有活跃 hold
@@ -868,7 +1422,7 @@ class UIManager {
         // 根据状态更新 UI 样式
         if (isGameFailed) {
             statusEl.classList.add('failed');
-            statusIcon.textContent = '❌';
+            statusIcon.textContent = '✕';
             statusText.textContent = 'FAILED';
         } else {
             statusEl.classList.remove('failed');
@@ -971,6 +1525,12 @@ class UIManager {
 
     // ========== 重新游玩 ==========
     retryGame() {
+        // 停止结算音乐等残留播放
+        audioEngine.stopMusic();
+        if (this._musicStartTimeout) {
+            clearTimeout(this._musicStartTimeout);
+            this._musicStartTimeout = null;
+        }
         // 隐藏结果画面
         this.resultScreen.classList.add('hidden');
         // 直接重新开始当前歌曲
@@ -1004,6 +1564,13 @@ class UIManager {
                 b.classList.toggle('active', b.dataset.style === s.noteStyle);
             });
         }
+
+        // 应用全局偏移
+        if (s.audioOffset !== undefined && typeof audioOffsetMs !== 'undefined') {
+            audioOffsetMs = s.audioOffset;
+            if (this.offsetSlider) this.offsetSlider.value = audioOffsetMs;
+            if (this.offsetValue) this.offsetValue.textContent = (audioOffsetMs > 0 ? '+' : '') + audioOffsetMs + 'ms';
+        }
     }
 
     // ========== 设置变更时同步持久化 ==========
@@ -1016,11 +1583,10 @@ class UIManager {
     // ========== 成绩导出 (JSON) ==========
     exportResults() {
         const accuracy = gameState.calculateTotalAcc();
-        let rank = 'C';
-        if (accuracy >= 95 && gameState.miss === 0) rank = 'S';
-        else if (accuracy >= 85) rank = 'A';
-        else if (accuracy >= 70) rank = 'B';
-        if (gameState.health <= 0) rank = 'F';
+        // 与结算一致的等级算法
+        const scoreResult = gameState.calculateFinalScore();
+        const isFailed = gameState.health <= 0;
+        const rank = gameState.calculateRank(scoreResult.finalScore, isFailed).rank;
 
         const now = new Date();
         const record = {
@@ -1090,6 +1656,21 @@ class UIManager {
         }
     }
 
+    // ========== 全局偏移控制 ==========
+    setAudioOffset(ms, updateUI) {
+        // 限制在 -100 ~ +100 范围
+        audioOffsetMs = Math.max(-100, Math.min(100, ms));
+
+        if (this.offsetSlider) {
+            this.offsetSlider.value = audioOffsetMs;
+        }
+        if (this.offsetValue) {
+            this.offsetValue.textContent = (audioOffsetMs > 0 ? '+' : '') + audioOffsetMs + 'ms';
+        }
+
+        this._syncSettingsToStore();
+    }
+
     // ========== 音量控制 ==========
     setVolume(level) {
         // 限制在 0-10 范围
@@ -1130,20 +1711,41 @@ class UIManager {
 
             // 游戏中的按键
             if (gameState.screen === 'game') {
-                // 空格键快速结束（双击）
-                if (key === ' ') {
-                    e.preventDefault();
-                    const now = performance.now();
-                    if (now - gameState.lastSpacePressTime < 400) {
-                        this.endGame();
+                // 暂停中快捷操作
+                if (gameState.paused) {
+                    if (key === 'r') {
+                        this.retryGame();
                         return;
                     }
-                    gameState.lastSpacePressTime = now;
+                    if (key === 'h') {
+                        audioEngine.stopMusic();
+                        this.goToHome();
+                        return;
+                    }
                 }
 
-                // 轨道按键
+                // 双击空格：跳过前奏（音乐开始后 10s 内、首个音符尚未出现）
+                if (key === ' ') {
+                    const nowMs = performance.now();
+                    const isDouble = this._lastSpaceDownAt && (nowMs - this._lastSpaceDownAt <= 500);
+                    this._lastSpaceDownAt = nowMs;
+                    if (isDouble) {
+                        e.preventDefault();
+                        this.skipIntro();
+                        return;
+                    }
+                }
+
+                // ESC / P 暂停或继续
+                if (key === 'escape' || key === 'p') {
+                    e.preventDefault();
+                    this.togglePause();
+                    return;
+                }
+
+                // 轨道按键（暂停时不触发判定）
                 const trackIndex = KEYS.indexOf(key);
-                if (trackIndex !== -1 && !gameState.pressedKeys.has(key)) {
+                if (trackIndex !== -1 && !gameState.paused && !gameState.pressedKeys.has(key)) {
                     gameState.pressedKeys.add(key);
                     this.checkHit(trackIndex);
                 }
@@ -1154,11 +1756,94 @@ class UIManager {
             const key = e.key.toLowerCase();
             const trackIndex = KEYS.indexOf(key);
             // Hold 释放检查
-            if (trackIndex !== -1 && gameState.screen === 'game') {
+            if (trackIndex !== -1 && gameState.screen === 'game' && !gameState.paused) {
                 this.checkHoldRelease(trackIndex);
             }
             gameState.pressedKeys.delete(key);
         });
+    }
+
+    // ========== 跳过前奏 ==========
+
+    /**
+     * 跳过前奏：音乐已播放且开始后 10s 内首个音符尚未出现时，
+     * 双击空格将场景时间轴与音乐时间轴整体跳到「首个音符前 5s」
+     */
+    skipIntro() {
+        if (gameState.screen !== 'game' || gameState.paused) return;
+        if (!audioEngine.isPlaying || audioEngine._paused) return;   // 音乐尚未启动
+
+        const now = performance.now();
+        const sceneTime = now - gameState.startTime;
+        if (sceneTime < 0 || sceneTime > 10000) return;              // 仅限音乐开始后 10s 内
+
+        const firstNoteTime = this._getFirstNoteTime();
+        if (firstNoteTime === null) return;
+        if (sceneTime >= firstNoteTime - 5000) return;               // 已进入音符 5s 缓冲区
+
+        const target = Math.max(0, firstNoteTime - 5000);
+        const delta = target - sceneTime;
+        gameState.startTime += delta;
+        gameState.intervalStartTime += delta;
+        audioEngine.seekMusic(target);
+        console.log(`Skipped intro: jumped ${delta.toFixed(0)}ms to T+${target.toFixed(0)}ms`);
+    }
+
+    /** 获取当前谱面的首个音符场景时间（ms），无音符返回 null */
+    _getFirstNoteTime() {
+        if (Array.isArray(gameState.notes) && gameState.notes.length > 0) {
+            return gameState.notes[0].time;
+        }
+        const chartData = getLoadedChartData();
+        if (chartData && Array.isArray(chartData.notes) && chartData.notes.length > 0) {
+            return chartData.notes[0].time;
+        }
+        if (loadedMidiData && Array.isArray(loadedMidiData.notes) && loadedMidiData.notes.length > 0) {
+            return loadedMidiData.notes[0].time;
+        }
+        return null;
+    }
+
+    // ========== 暂停 / 恢复 ==========
+    togglePause() {
+        if (gameState.screen !== 'game') return;
+
+        if (gameState.paused) {
+            // 恢复：时间轴整体平移暂停时长
+            const pauseDuration = performance.now() - gameState.pauseStartedAt;
+            gameState.startTime += pauseDuration;
+            gameState.intervalStartTime += pauseDuration;
+            gameState.paused = false;
+            audioEngine.resumeMusic();
+
+            // 若音乐启动定时器挂起中，按剩余延迟重新调度
+            if (this._musicRestartDelay > 0 && this._musicDelayMs > 0) {
+                this._musicStartTimeout = setTimeout(() => {
+                    this._musicStartTimeout = null;
+                    this._playGameMusic((getLoadedChartData()?.meta?.audioOffset) || 0);
+                }, this._musicRestartDelay);
+                this._musicRestartDelay = 0;
+            }
+        } else {
+            const currentTime = performance.now() - gameState.startTime;
+            if (currentTime < 0) return; // 倒计时中不允许暂停
+            gameState.paused = true;
+            gameState.pauseStartedAt = performance.now();
+            gameState.pauseSnapshotTime = currentTime;
+            // 清空按键状态，避免暂停期间的按键在恢复后被当作长按
+            gameState.pressedKeys.clear();
+
+            // 音乐尚未启动（定时器挂起中）：暂停时顺延其剩余时间
+            if (this._musicStartTimeout) {
+                clearTimeout(this._musicStartTimeout);
+                this._musicStartTimeout = null;
+                this._musicRestartDelay = Math.max(0, this._musicDelayMs - (performance.now() - this._musicScheduledAt));
+            } else {
+                this._musicRestartDelay = 0;
+            }
+
+            audioEngine.pauseMusic();
+        }
     }
 
     // ========== 移动端控制 (增强版) ==========
@@ -1175,7 +1860,7 @@ class UIManager {
                 btn.classList.add('active');
                 gameState.pressedKeys.add(KEYS[index]);
 
-                if (gameState.screen === 'game') {
+                if (gameState.screen === 'game' && !gameState.paused) {
                     this.checkHit(index);
                 }
             });
@@ -1183,7 +1868,7 @@ class UIManager {
             btn.addEventListener('pointerup', (e) => {
                 e.preventDefault();
                 btn.classList.remove('active');
-                if (gameState.screen === 'game') {
+                if (gameState.screen === 'game' && !gameState.paused) {
                     this.checkHoldRelease(index);
                 }
                 gameState.pressedKeys.delete(KEYS[index]);
@@ -1191,7 +1876,7 @@ class UIManager {
 
             btn.addEventListener('pointerleave', (e) => {
                 btn.classList.remove('active');
-                if (gameState.screen === 'game') {
+                if (gameState.screen === 'game' && !gameState.paused) {
                     this.checkHoldRelease(index);
                 }
                 gameState.pressedKeys.delete(KEYS[index]);
@@ -1205,7 +1890,7 @@ class UIManager {
         const canvas = document.getElementById('gameCanvas');
         if (canvas) {
             canvas.addEventListener('touchstart', (e) => {
-                if (gameState.screen !== 'game') return;
+                if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
                 for (const touch of e.changedTouches) {
                     this._handleCanvasTouch(touch.clientX, touch.clientY, true);
@@ -1213,7 +1898,7 @@ class UIManager {
             }, { passive: false });
 
             canvas.addEventListener('touchend', (e) => {
-                if (gameState.screen !== 'game') return;
+                if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
                 for (const touch of e.changedTouches) {
                     this._handleCanvasTouch(touch.clientX, touch.clientY, false);
@@ -1221,7 +1906,7 @@ class UIManager {
             }, { passive: false });
 
             canvas.addEventListener('touchcancel', (e) => {
-                if (gameState.screen !== 'game') return;
+                if (gameState.screen !== 'game' || gameState.paused) return;
                 for (const touch of e.changedTouches) {
                     this._handleCanvasTouch(touch.clientX, touch.clientY, false);
                 }
@@ -1259,6 +1944,7 @@ class UIManager {
     // ========== 打击判定 (双阈值提前终止) ==========
     checkHit(track) {
         if (!renderer) return false;
+        if (gameState.paused) return false;
 
         const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
         const currentTime = performance.now() - gameState.startTime;
@@ -1406,12 +2092,24 @@ class UIManager {
             return;
         }
 
+        this._lbOrigin = fromResult ? 'result' : 'start';
+
+        // 按来源设置默认筛选与排序：
+        // 首页 → 全部歌曲 + 按分数；结算页 → 仅当前歌曲 + 按分数
+        this._lbDefaultFilter = (fromResult && selectedSongDisplayName) ? selectedSongDisplayName : '__all__';
+        this._lbDefaultSort = 'score';
+
         // 根据来源隐藏对应画面
         if (fromResult && this.resultScreen) {
             this.resultScreen.classList.add('hidden');
         } else if (!fromResult && this.startScreen) {
             this.startScreen.classList.add('hidden');
         }
+
+        // 激活默认排序按钮
+        document.querySelectorAll('.lb-sort-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.sort === this._lbDefaultSort);
+        });
 
         this._populateSongFilter();
         this._renderLeaderboardList();
@@ -1429,13 +2127,20 @@ class UIManager {
         if (this.leaderboardScreen) {
             this.leaderboardScreen.classList.add('hidden');
         }
-        // 重置游戏状态，确保可以正常渲染开始画面
+        // 重置游戏状态，确保界面干净
         gameState.reset();
         if (renderer) renderer.resetPools();
-        // 返回开始画面
-        this.startScreen.classList.remove('hidden');
-        _lastFrameTime = performance.now();
-        requestAnimationFrame(renderStartScreen);
+        if (this._lbOrigin === 'result' && this.resultScreen) {
+            // 从结算页面进入：返回结算页面（保留成绩显示）
+            this.resultScreen.classList.remove('hidden');
+            this.startScreen.classList.add('hidden');
+        } else {
+            // 从开始画面进入：返回开始画面
+            this.startScreen.classList.remove('hidden');
+            _lastFrameTime = performance.now();
+            requestAnimationFrame(renderStartScreen);
+        }
+        this._lbOrigin = 'start';
     }
 
     /** 填充歌曲筛选下拉框 */
@@ -1443,7 +2148,6 @@ class UIManager {
         if (!this.lbSongFilter) return;
 
         const summaries = leaderboard.getAllSongSummaries();
-        const currentValue = this.lbSongFilter.value;
 
         this.lbSongFilter.innerHTML = '<option value="__all__">All Songs</option>';
 
@@ -1454,16 +2158,18 @@ class UIManager {
             this.lbSongFilter.appendChild(option);
         });
 
-        // 恢复之前的选择
-        if (currentValue && [...this.lbSongFilter.options].some(o => o.value === currentValue)) {
-            this.lbSongFilter.value = currentValue;
+        // 按来源默认值选中（返回结算页时只看当前歌曲；首页看全部）
+        if (this._lbDefaultFilter && [...this.lbSongFilter.options].some(o => o.value === this._lbDefaultFilter)) {
+            this.lbSongFilter.value = this._lbDefaultFilter;
+        } else {
+            this.lbSongFilter.value = '__all__';
         }
     }
 
     /** 获取当前排序方式 */
     _getCurrentSortBy() {
         const activeBtn = document.querySelector('.lb-sort-btn.active');
-        return activeBtn ? activeBtn.dataset.sort : 'date';
+        return activeBtn ? activeBtn.dataset.sort : 'score';
     }
 
     /** 渲染排行榜列表 */
@@ -1501,7 +2207,7 @@ class UIManager {
         if (records.length === 0) {
             this.lbList.innerHTML = `
                 <div class="lb-empty">
-                    <span class="lb-empty-icon">📭</span>
+                    <span class="lb-empty-icon">-</span>
                     <span>No records yet</span>
                     <span class="lb-empty-hint">Play a song to record your score!</span>
                 </div>`;
@@ -1517,9 +2223,9 @@ class UIManager {
             // 排名标记
             let rankIcon = '';
             if (sortBy === 'score' || sortBy === 'accuracy') {
-                if (i === 0) rankIcon = '<span class="lb-record-rank top1">🥇</span>';
-                else if (i === 1) rankIcon = '<span class="lb-record-rank top2">🥈</span>';
-                else if (i === 2) rankIcon = '<span class="lb-record-rank top3">🥉</span>';
+                if (i === 0) rankIcon = '<span class="lb-record-rank top1">1</span>';
+                else if (i === 1) rankIcon = '<span class="lb-record-rank top2">2</span>';
+                else if (i === 2) rankIcon = '<span class="lb-record-rank top3">3</span>';
                 else rankIcon = `<span class="lb-record-rank">${i + 1}</span>`;
             } else {
                 rankIcon = `<span class="lb-record-rank">${i + 1}</span>`;
@@ -1787,7 +2493,7 @@ class UIManager {
             ? this.lbDetailTitle.textContent.replace(/^.* - /, '')
             : 'this record';
         const warnMsg = [
-            '⚠ WARNING: This action cannot be undone!',
+            'WARNING: This action cannot be undone!',
             '',
             `You are about to permanently delete:`,
             `  Song: ${this._detailSongName}`,
@@ -1802,7 +2508,7 @@ class UIManager {
 
         // 防护 2：二次确认 - 要求明确输入 DELETE 才执行
         const secondMsg = [
-            '🔴 FINAL CONFIRMATION',
+            'FINAL CONFIRMATION',
             '',
             'This is your last chance to cancel.',
             'The record will be permanently erased.',
@@ -1813,7 +2519,7 @@ class UIManager {
         const userInput = prompt(secondMsg, '');
         if (userInput !== 'DELETE') {
             if (userInput !== null) {
-                alert('❌ Deletion cancelled.\nYou must type "DELETE" exactly to confirm.');
+                alert('Deletion cancelled.\nYou must type "DELETE" exactly to confirm.');
             }
             return;
         }
@@ -1927,6 +2633,7 @@ class UIManager {
      */
     checkHoldRelease(track) {
         if (!renderer) return;
+        if (gameState.paused) return;
 
         const currentTime = performance.now() - gameState.startTime;
         if (currentTime < 0) return;
@@ -1949,6 +2656,7 @@ class UIManager {
     updateHolds() {
         const currentTime = performance.now() - gameState.startTime;
         if (currentTime < 0) return;
+        if (gameState.paused) return;
 
         for (let track = 0; track < 4; track++) {
             const holdNote = gameState.activeHolds[track];
@@ -1972,10 +2680,10 @@ class UIManager {
                     // 如果头部已被判定为 perfect/great，修正为 miss
                     if (holdNote._headWasPerfect === true) {
                         gameState.perfect--;
-                        gameState.intervalStats.perfect--;
+                        gameState.intervalStats.perfect = Math.max(0, gameState.intervalStats.perfect - 1);
                     } else if (holdNote._headWasPerfect === false) {
                         gameState.great--;
-                        gameState.intervalStats.great--;
+                        gameState.intervalStats.great = Math.max(0, gameState.intervalStats.great - 1);
                     }
                     gameState.miss++;
                     gameState.intervalStats.miss++;

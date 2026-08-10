@@ -29,16 +29,16 @@
                 
                 <div class="start-actions">
                     <button class="btn btn-secondary" id="leaderboardStartBtn">
-                        <span class="btn-icon">🏆</span> RECORDS
+                        RECORDS
                     </button>
                     <button class="btn btn-secondary" id="settingsBtn" disabled>
-                        <span class="btn-icon">⚙</span> SETTING
+                        SETTING
                     </button>
                     <button class="btn btn-primary" id="startBtn" disabled>
                         <span class="btn-icon">▶</span> START
                     </button>
-                    <a class="btn btn-secondary" id="helpBtn" href="faq.html" style="text-decoration:none;">
-                        <span class="btn-icon">❓</span> HELP
+                    <a class="btn btn-secondary" id="helpBtn" href="pages/faq.html" style="text-decoration:none;">
+                        HELP
                     </a>
                 </div>
             </div>
@@ -59,7 +59,7 @@
                         <div class="tab-content active" id="tabContentMidi">
                             <div class="song-card import-card" id="importMidiCard">
                                 <div class="card-body">
-                                    <div class="card-icon">📂</div>
+                                    <div class="card-icon">♪</div>
                                     <div class="card-info">
                                         <span class="card-title import-title">IMPORT MIDI</span>
                                         <span class="card-sub">Load from device</span>
@@ -75,7 +75,7 @@
                             
                             <div class="song-cards" id="songCardsMidi"></div>
                             <div class="song-empty" id="songEmptyMidi" style="display:none;">
-                                <span class="empty-icon">🎹</span>
+                                <span class="empty-icon">♪</span>
                                 <span>No MIDI songs in library</span>
                                 <span class="empty-hint">Use import above</span>
                             </div>
@@ -83,15 +83,27 @@
                         
                         <!-- SONGS Tab Content -->
                         <div class="tab-content" id="tabContentSongs">
+                            <div class="song-card import-card" id="importOsuCard">
+                                <div class="card-body">
+                                    <div class="card-icon">▣</div>
+                                    <div class="card-info">
+                                        <span class="card-title import-title">IMPORT .OSU / .OSZ</span>
+                                        <span class="card-sub">osu!mania 4K beatmap or pack</span>
+                                    </div>
+                                    <div class="card-arrow">→</div>
+                                </div>
+                                <input type="file" id="osuUpload" accept=".osu,.osz" class="card-file-input">
+                            </div>
+
                             <div class="song-divider">
                                 <span>BEATMAP LIBRARY</span>
                             </div>
                             
                             <div class="song-cards" id="songCardsSongs"></div>
                             <div class="song-empty" id="songEmptySongs" style="display:none;">
-                                <span class="empty-icon">🎵</span>
+                                <span class="empty-icon">♪</span>
                                 <span>No beatmap songs in library</span>
-                                <span class="empty-hint">Add .mc files to assets/songs/</span>
+                                <span class="empty-hint">Add .mc to assets/songs/ or .osu to assets/osu/</span>
                             </div>
                         </div>
                     </div>
@@ -155,6 +167,15 @@
                     </div>
                 </div>
 
+                <div class="settings-group">
+                    <label class="settings-label">GLOBAL OFFSET</label>
+                    <div class="volume-control">
+                        <input type="range" id="offsetSlider" min="-100" max="100" step="5" value="0" class="volume-slider">
+                        <span class="volume-value" id="offsetValue">0ms</span>
+                    </div>
+                    <div class="settings-hint">负数使音符更早到达判定线,正数反之</div>
+                </div>
+
                 <div class="settings-actions">
                     <button class="btn btn-secondary" id="settingsBackBtn">BACK</button>
                     <button class="btn btn-primary" id="settingsStartBtn">START GAME</button>
@@ -169,7 +190,7 @@
             <div class="result-card" id="resultCard">
                 <!-- 状态指示 -->
                 <div class="result-status" id="resultStatus">
-                    <div class="status-icon" id="statusIcon">🎵</div>
+                    <div class="status-icon" id="statusIcon">♪</div>
                     <div class="status-text" id="statusText">COMPLETED</div>
                 </div>
                 
@@ -219,11 +240,11 @@
                 
                 <!-- 按钮操作 -->
                 <div class="result-actions">
-                    <button class="btn btn-purple" id="retryBtn">🔄 RETRY</button>
-                    <button class="btn btn-secondary" id="leaderboardBtn">🏆 LEADERBOARD</button>
+                    <button class="btn btn-purple" id="retryBtn">RETRY</button>
+                    <button class="btn btn-secondary" id="leaderboardBtn">LEADERBOARD</button>
                     <div class="result-actions-row">
-                        <button class="btn btn-secondary" id="exportBtn">📊 EXPORT JSON</button>
-                        <button class="btn btn-primary" id="homeBtn">🏠 HOME</button>
+                        <button class="btn btn-secondary" id="exportBtn">EXPORT JSON</button>
+                        <button class="btn btn-primary" id="homeBtn">HOME</button>
                     </div>
                 </div>
             </div>
@@ -238,7 +259,7 @@
         <div class="lb-overlay">
             <div class="lb-card">
                 <div class="lb-header">
-                    <h2>🏆 LEADERBOARD</h2>
+                    <h2>LEADERBOARD</h2>
                     <button class="lb-close-btn" id="lbCloseBtn">✕</button>
                 </div>
 
@@ -262,7 +283,7 @@
                 <div class="lb-list-wrapper">
                     <div class="lb-list" id="lbList">
                         <div class="lb-empty">
-                            <span class="lb-empty-icon">📭</span>
+                            <span class="lb-empty-icon">-</span>
                             <span>No records yet</span>
                             <span class="lb-empty-hint">Play a song to record your score!</span>
                         </div>
@@ -280,14 +301,14 @@
                     </div>
                     <div class="lb-detail-stats" id="lbDetailStats"></div>
                     <div class="lb-detail-actions">
-                        <button class="btn btn-danger btn-sm" id="lbDetailDelete">⚠ DELETE RECORD</button>
+                        <button class="btn btn-danger btn-sm" id="lbDetailDelete">DELETE RECORD</button>
                     </div>
                 </div>
 
                 <!-- 导入/导出操作 -->
                 <div class="lb-io">
-                    <button class="btn btn-secondary btn-sm" id="lbExportAllBtn">📤 EXPORT ALL</button>
-                    <button class="btn btn-secondary btn-sm" id="lbImportBtn">📥 IMPORT</button>
+                    <button class="btn btn-secondary btn-sm" id="lbExportAllBtn">EXPORT ALL</button>
+                    <button class="btn btn-secondary btn-sm" id="lbImportBtn">IMPORT</button>
                     <input type="file" id="lbImportFile" accept=".json" class="lb-file-input">
                 </div>
 
@@ -307,15 +328,13 @@
         </div>
     </div>
 
-</body>
-
-    <!-- ==================== 移动端控制 ==================== -->
-    <div id="mobileControls">
-        <div class="mobile-btns">
-            <div class="mobile-btn" data-key="d">D</div>
-            <div class="mobile-btn" data-key="f">F</div>
-            <div class="mobile-btn" data-key="j">J</div>
-            <div class="mobile-btn" data-key="k">K</div>
+    <!-- ==================== .osz 谱面选择器 ==================== -->
+    <div id="oszPicker" class="osz-picker-overlay hidden">
+        <div class="osz-picker">
+            <div class="osz-picker-title">SELECT BEATMAP</div>
+            <div class="osz-picker-sub">该 .osz 包含多个谱面,选择要游玩的一个</div>
+            <div class="osz-picker-list" id="oszPickerList"></div>
+            <button class="btn btn-secondary" id="oszPickerCancel">← CANCEL</button>
         </div>
     </div>
 
@@ -327,6 +346,8 @@
     <script src="js/audio-engine.js"></script>
     <script src="js/midi-parser.js"></script>
     <script src="js/mc-parser.js"></script>
+    <script src="js/osu-parser.js"></script>
+    <script src="js/osu-zip.js"></script>
     <script src="js/note-generator.js"></script>
     <script src="js/renderer.js"></script>
     <script src="js/ui.js"></script>
