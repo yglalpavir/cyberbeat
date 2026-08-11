@@ -123,6 +123,7 @@ function gameLoop(timestamp) {
     renderer.drawParticles();
     renderer.drawJudgments();
     renderer.drawHUD();
+    renderer.drawSkipIntroHint();
 
     // Hold 长条状态更新
     ui.updateHolds();

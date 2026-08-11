@@ -2041,6 +2041,18 @@ body {
     color: var(--text-secondary);
 }
 
+.osz-pick-diff {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.osz-pick-diff.lvl-easy { color: #4dd4c0; }
+.osz-pick-diff.lvl-normal { color: #4dabf7; }
+.osz-pick-diff.lvl-hard { color: #ffd43b; }
+.osz-pick-diff.lvl-expert { color: #ff6b6b; }
+.osz-pick-diff.lvl-master { color: #c44dff; }
+
 .osz-pick-audio {
     font-size: 0.68rem;
     color: var(--text-tertiary);

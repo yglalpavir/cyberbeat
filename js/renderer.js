@@ -594,6 +594,52 @@ class Renderer {
         ctx.restore();
     }
 
+    // ========== 跳过前奏提示 ==========
+
+    /**
+     * 音乐已启动且开始后 10s 内仍未到首个音符前 5s 缓冲时，
+     * 在判定线附近提示「Press Space to skip」
+     */
+    drawSkipIntroHint() {
+        if (gameState.screen !== 'game' || gameState.paused) return;
+        if (!audioEngine.isPlaying || audioEngine._paused) return;
+
+        const sceneTime = performance.now() - gameState.startTime;
+        if (sceneTime < 0 || sceneTime > 10000) return;
+
+        const notes = gameState.notes;
+        if (!notes || notes.length === 0) return;
+        if (sceneTime >= notes[0].time - 5000) return;
+
+        const ctx = this.ctx;
+        ctx.save();
+
+        const cx = this.canvasWidth / 2;
+        const cy = CONFIG.judgmentLineY * this.canvasHeight;
+        const pulse = 0.55 + 0.3 * Math.sin(performance.now() / 280);
+
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // 背景发光
+        ctx.fillStyle = `rgba(0, 0, 0, ${0.38 * pulse})`;
+        const w = ctx.measureText('Press Space to skip').width;
+        ctx.beginPath();
+        ctx.roundRect(cx - w / 2 - 18, cy - 80, w + 36, 34, 17);
+        ctx.fill();
+
+        // 高亮 "Space" 部分
+        ctx.fillStyle = `rgba(255, 255, 255, ${pulse.toFixed(3)})`;
+        ctx.fillText('Press ', cx - 26, cy - 63);
+        ctx.fillStyle = `rgba(77, 171, 247, ${Math.min(1, pulse + 0.2).toFixed(3)})`;
+        ctx.fillText('Space', cx + 16, cy - 63);
+        ctx.fillStyle = `rgba(255, 255, 255, ${pulse.toFixed(3)})`;
+        ctx.fillText(' to skip', cx + 56, cy - 63);
+
+        ctx.restore();
+    }
+
     // ========== 暂停遮罩 ==========
     drawPauseOverlay() {
         const ctx = this.ctx;

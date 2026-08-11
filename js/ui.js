@@ -642,8 +642,11 @@ class UIManager {
             );
         }
 
-        // 按难度标签排序展示（如 Regular-5 → Regular-10；无数字尾缀排最后）
-        candidates.sort((a, b) => this.oszDifficultyRank(a.parsed) - this.oszDifficultyRank(b.parsed));
+        // 自动计算难度（参考 osu!mania 应变算法），按难度由小到大排序展示
+        for (const c of candidates) {
+            c.difficulty = new DifficultyCalculator(c.parsed.notes).calculate();
+        }
+        candidates.sort((a, b) => a.difficulty.star - b.difficulty.star);
 
         this._oszZip = zip;
         this._oszCandidates = candidates;
@@ -654,16 +657,6 @@ class UIManager {
         } else {
             this.showOszPicker(candidates);
         }
-    }
-
-    /** 提取谱面难度排序键：优先 "Reg-N"/"Regular-N" 编号，其次版本尾数，其余保持原顺序 */
-    oszDifficultyRank(parsed) {
-        const version = String(parsed.meta.version || '').trim();
-        const m = version.match(/(?:reg(?:ular)?[-_\s]+)(\d+)/i);
-        if (m) return Number(m[1]);
-        const tail = version.match(/(\d+(?:\.\d+)?)\s*$/);
-        if (tail) return Number(tail[1]);
-        return Number.MAX_SAFE_INTEGER;
     }
 
     /**
@@ -714,13 +707,18 @@ class UIManager {
                 (meta.title || 'Unknown') + ' — ' + (meta.artist || '') + ' · ' +
                 (meta.column || 4) + 'K · ' + c.parsed.notes.length.toLocaleString() + ' NOTES';
 
+            const diff = c.difficulty || new DifficultyCalculator(c.parsed.notes).calculate();
+            const diffEl = document.createElement('span');
+            diffEl.className = 'osz-pick-diff ' + this._levelToTheme(diff.level);
+            diffEl.textContent = '★ ' + diff.star.toFixed(2) + ' · LEVEL ' + diff.level;
+
             const audioEl = document.createElement('span');
             audioEl.className = 'osz-pick-audio';
             audioEl.textContent = audioEntry
                 ? '♪ ' + audioEntry.name.split('/').pop()
                 : '♪ no audio found in pack — preset music will be used';
 
-            btn.append(versionEl, metaEl, audioEl);
+            btn.append(versionEl, metaEl, diffEl, audioEl);
             this.oszPickerList.appendChild(btn);
         }
 
@@ -1183,8 +1181,9 @@ class UIManager {
 
         const chartData = getLoadedChartData();
         if (chartData && chartData.meta) {
-            // 谱面（.mc / .osu）：使用谱面元数据
-            bpmText = `BPM ${chartData.meta.bpm}`;
+            // 谱面（.mc / .osu）：使用谱面元数据 + 自动计算难度
+            const diff = new DifficultyCalculator(chartData.notes).calculate();
+            bpmText = `BPM ${chartData.meta.bpm}  •  ★ ${diff.star.toFixed(2)}  •  Lv.${diff.level}`;
             durText = formatDuration(chartData.meta.duration);
             if (chartData.meta.version) {
                 bpmText += `  •  ${chartData.meta.version}`;
@@ -1782,9 +1781,9 @@ class UIManager {
         if (sceneTime >= firstNoteTime - 5000) return;               // 已进入音符 5s 缓冲区
 
         const target = Math.max(0, firstNoteTime - 5000);
-        const delta = target - sceneTime;
-        gameState.startTime += delta;
-        gameState.intervalStartTime += delta;
+        const delta = target - sceneTime;                 // 场景时间需前进的量
+        gameState.startTime = now - target;               // 直接重定位场景时间轴起点
+        gameState.intervalStartTime -= delta;             // 保持与 startTime 的相对偏移不变
         audioEngine.seekMusic(target);
         console.log(`Skipped intro: jumped ${delta.toFixed(0)}ms to T+${target.toFixed(0)}ms`);
     }
