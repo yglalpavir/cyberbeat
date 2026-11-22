@@ -33,8 +33,30 @@ async function init() {
         // Safari 在 orientationchange 时 innerHeight 尚未更新，延迟两帧重算
         requestAnimationFrame(() => requestAnimationFrame(() => {
             if (renderer) renderer.resize();
+            showRotateToast();
         }));
     });
+
+    // 移动端旋转提示：游戏进行中横竖屏切换时短暂显示 toast
+    let _rotateToastTimer = null;
+    let _lastOrientation = null;
+    function showRotateToast() {
+        if (!IS_TOUCH_DEVICE) return;
+        const orientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+        if (_lastOrientation !== null && _lastOrientation !== orientation) {
+            const toast = document.getElementById('rotateToast');
+            if (toast) {
+                toast.classList.remove('hidden');
+                requestAnimationFrame(() => toast.classList.add('visible'));
+                clearTimeout(_rotateToastTimer);
+                _rotateToastTimer = setTimeout(() => {
+                    toast.classList.remove('visible');
+                    _rotateToastTimer = setTimeout(() => toast.classList.add('hidden'), 350);
+                }, 1800);
+            }
+        }
+        _lastOrientation = orientation;
+    }
 
     // 性能监控快捷切换: 按 ~ 键（触屏设备无键盘，连点暂停按钮 5 次切换）
     document.addEventListener('keydown', (e) => {
@@ -75,10 +97,33 @@ function renderStartScreen(ts) {
 function gameLoop(timestamp) {
     if (gameState.screen !== 'game') return;
 
+    const now = performance.now();
+
     perfMonitor.beginFrame();
 
     // 每帧同步游戏内 DOM 控件（暂停按钮 / 跳过前奏按钮）
     if (ui) ui.updateInGameUI();
+
+    // 暂停恢复倒计时：画面冻结在暂停瞬间，只画 3-2-1
+    if (gameState.resumeCountdownUntil > 0 && !gameState.paused) {
+        const ctx = renderer.ctx;
+        ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
+        renderer.drawBackground(0);
+        renderer.drawTracks();
+        renderer.drawNotes(gameState.pauseSnapshotTime);
+        renderer.drawParticles();
+        renderer.drawJudgments();
+        renderer.drawHUD();
+        renderer.drawCountdown((gameState.resumeCountdownUntil - now) / 1000, true);
+        perfMonitor.endFrame();
+
+        // 倒计时结束 → 平移时间轴恢复音乐
+        if (ui && ui._tickResumeCountdown()) {
+            _lastFrameTime = timestamp;
+        }
+        requestAnimationFrame(gameLoop);
+        return;
+    }
 
     // === 帧时序平滑 (VSync) ===
     // 限制最大帧间隔为 50ms (20fps 下限)，防止大跳帧导致的间断感
@@ -86,8 +131,6 @@ function gameLoop(timestamp) {
     if (rawDelta <= 0) rawDelta = 16.67;
     const frameDelta = Math.min(rawDelta, 50);
     _lastFrameTime = timestamp;
-
-    const now = performance.now();
 
     // 暂停：冻结场景时间，仅绘制遮罩（不推进、不判定）
     if (gameState.paused) {

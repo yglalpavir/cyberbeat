@@ -1828,8 +1828,36 @@ html.is-touch body.game-active .game-pause-btn {
 /* 组件级 hidden（区别于 .screen 的淡出过渡） */
 .game-pause-btn.hidden,
 .skip-intro-btn.hidden,
-.pause-overlay.hidden {
+.pause-overlay.hidden,
+.rotate-toast.hidden {
     display: none;
+}
+
+/* ===== 旋转提示 toast（移动端横竖屏切换时短暂显示） ===== */
+.rotate-toast {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 64px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    padding: 9px 18px;
+    font-family: var(--font-family);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text-primary);
+    background: rgba(22, 22, 31, 0.92);
+    border: 1px solid var(--border-medium);
+    border-radius: 999px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    white-space: nowrap;
+}
+
+.rotate-toast.visible {
+    opacity: 1;
 }
 
 /* 触屏设备游戏内：JS 移除 hidden 后真正显示跳过前奏按钮 */

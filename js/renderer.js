@@ -362,29 +362,41 @@ class Renderer {
     }
 
     // ========== 倒计时 ==========
-    drawCountdown(secondsLeft) {
+    /** @param {boolean} resumeMode true = 暂停恢复倒计时（数字略小并显示 READY 提示） */
+    drawCountdown(secondsLeft, resumeMode = false) {
         if (secondsLeft <= 0) return;
         const ctx = this.ctx;
+        const s = this._hudScale;
         const centerX = this.canvasWidth / 2;
-        const centerY = this.canvasHeight / 2 - 30;
+        const centerY = this.canvasHeight / 2 - 30 * s;
+        const radius = (resumeMode ? 44 : 55) * Math.max(0.85, s);
+        const fontSize = (resumeMode ? 42 : 52) * Math.max(0.85, s);
 
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.beginPath();
-        ctx.arc(centerX, centerY, 55, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, radius + 5, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 52px sans-serif';
+        ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(Math.ceil(secondsLeft).toString(), centerX, centerY + 2);
 
-        ctx.strokeStyle = '#4dabf7';
+        ctx.strokeStyle = resumeMode ? '#69db7c' : '#4dabf7';
         ctx.lineWidth = 4;
         ctx.beginPath();
         const progress = 1 - (secondsLeft / (CONFIG.countdownDuration / 1000));
-        ctx.arc(centerX, centerY, 50, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+        ctx.arc(centerX, centerY, radius - 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
         ctx.stroke();
+
+        // 恢复模式提示文字
+        if (resumeMode) {
+            ctx.font = `bold ${13 * Math.max(0.85, s)}px sans-serif`;
+            ctx.fillStyle = '#69db7c';
+            ctx.fillText('READY', centerX, centerY + radius + 22 * s);
+        }
+        ctx.textAlign = 'left';
     }
 
     // ========== 激光 (对象池) ==========
@@ -872,6 +884,11 @@ class Renderer {
             }
             this._touchPoints.delete(id);
         }
+    }
+
+    /** 清除所有按住中的触控点（暂停/重开时调用），涟漪保留自然消散 */
+    resetTouchPoints() {
+        this._touchPoints.clear();
     }
 
     /** 绘制触控点与涟漪（gameLoop 每帧调用） */

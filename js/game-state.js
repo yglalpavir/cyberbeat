@@ -34,6 +34,8 @@ class GameState {
         this.paused = false;
         this.pauseStartedAt = 0;       // 暂停时的 performance.now()
         this.pauseSnapshotTime = 0;    // 暂停时的场景时间（ms）
+        // 恢复倒计时（暂停后重新开始前给玩家缓冲）
+        this.resumeCountdownUntil = 0; // performance.now() 时间戳；为 0 表示无恢复倒计时
     }
 
     /**
