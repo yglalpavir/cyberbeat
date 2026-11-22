@@ -737,7 +737,12 @@ class Renderer {
         cCtx.clearRect(0, 0, w, h);
 
         if (historyData.length === 0) return;
-        const leftMargin = 40, topMargin = 20, bottomMargin = 20, rightMargin = 10;
+        // 矮窗口下图表容器只有 ~70px，边距按容器高度自适应，避免内容溢出
+        const compact = h < 100;
+        const leftMargin = compact ? 34 : 40;
+        const topMargin = compact ? 8 : 20;
+        const bottomMargin = compact ? 10 : 20;
+        const rightMargin = 10;
         const chartW = w - leftMargin - rightMargin;
         const chartH = h - topMargin - bottomMargin;
 
@@ -763,13 +768,15 @@ class Renderer {
         const yRange = yMax - yMin;
 
         cCtx.fillStyle = 'rgba(255,255,255,0.5)';
-        cCtx.font = '10px sans-serif';
+        cCtx.font = compact ? '8px sans-serif' : '10px sans-serif';
         cCtx.textAlign = 'right';
 
         const yTicks = this._generateYTicks(yMin, yMax);
-        for (let i = 0; i < yTicks.length; i++) {
+        // 矮容器时减少刻度数量，避免标签互相重叠
+        const tickStride = compact ? 2 : 1;
+        for (let i = 0; i < yTicks.length; i += tickStride) {
             const yPos = topMargin + chartH - (chartH * (yTicks[i] - yMin) / yRange);
-            cCtx.fillText(yTicks[i].toFixed(0) + '%', leftMargin - 4, yPos + 4);
+            cCtx.fillText(yTicks[i].toFixed(0) + '%', leftMargin - 4, yPos + (compact ? 3 : 4));
         }
 
         cCtx.strokeStyle = 'rgba(255,255,255,0.1)';

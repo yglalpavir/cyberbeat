@@ -2198,36 +2198,145 @@ html.is-touch .mobile-btn::before {
     .song-card { padding: 8px; min-height: 40px; }
     .card-meta { display: none; }
 
-    /* ===== 设置面板：矮窗口全屏化 + 内部滚动 ===== */
+    /* ===== 设置面板：矮窗口改为双列紧凑网格，尽量不滚动 ===== */
     .settings-card {
-        width: min(96vw, 560px);
+        width: min(96vw, 640px);
         max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-        padding: 14px 16px;
-        gap: 10px;
+        padding: 12px 16px;
+        gap: 8px 20px;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        align-content: start;
     }
 
-    /* ===== 结算画面：矮窗口可滚动 ===== */
+    /* 标题与歌曲信息横跨双列 */
+    .settings-card .settings-header,
+    .settings-card .settings-song-info {
+        grid-column: 1 / -1;
+    }
+
+    .settings-header h2 { font-size: 1rem; }
+
+    .settings-song-info { padding: 8px; }
+    .ssi-title { font-size: 0.8rem; }
+    .ssi-meta { font-size: 0.62rem; }
+
+    .settings-group { gap: 5px; margin: 0; }
+    .settings-label { font-size: 0.62rem; }
+
+    .diff-selector { grid-template-columns: repeat(2, 1fr); gap: 3px; }
+    .diff-btn { padding: 9px 2px; font-size: 0.62rem; }
+
+    .style-selector { gap: 6px; }
+    .style-btn { padding: 10px 8px; gap: 6px; }
+    .style-preview { width: 36px; height: 18px; }
+    .style-orb { width: 20px; height: 20px; }
+
+    .speed-control { gap: 10px; }
+    .speed-btn { width: 34px; height: 34px; font-size: 1rem; }
+    .speed-value { font-size: 0.95rem; min-width: 42px; }
+
+    .volume-control { gap: 8px; }
+    .volume-slider { height: 5px; }
+    .volume-slider::-webkit-slider-thumb { width: 20px; height: 20px; }
+    .volume-slider::-moz-range-thumb { width: 20px; height: 20px; }
+
+    .settings-hint { display: none; }   /* 矮窗口省略提示文字，保高度 */
+
+    .toggle-control { gap: 8px; }
+    .toggle-desc { font-size: 0.72rem; }
+    .toggle-switch { width: 44px; height: 26px; }
+    .toggle-knob { width: 20px; height: 20px; }
+    .toggle-switch[aria-checked="true"] .toggle-knob { transform: translateX(18px); }
+
+    /* 操作按钮横跨双列，固定在底部 */
+    .settings-actions {
+        grid-column: 1 / -1;
+        gap: 8px;
+        margin-top: 2px;
+    }
+    .settings-actions .btn { font-size: 0.75rem; padding: 10px 12px; }
+
+    /* ===== 结算画面：矮窗口双列紧凑，不滚动 ===== */
     .result-overlay {
         padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px calc(env(safe-area-inset-bottom, 0px) + 8px);
         align-items: center;
     }
 
     .result-card {
-        max-width: min(96vw, 560px);
-        padding: 14px 16px;
+        max-width: min(96vw, 640px);
+        padding: 12px 16px;
         gap: 10px;
         max-height: 100%;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
     }
 
+    .result-status { padding: 8px 14px; gap: 8px; }
+    .status-icon { font-size: 1.1rem; }
+    .status-text { font-size: 0.8rem; }
+
     .rank { font-size: 2.6rem; }
+    .rank-label { font-size: 0.7rem; }
+
+    .primary-stats { gap: 10px; }
+    .stat-big { padding: 10px 10px; }
     .stat-big .stat-value { font-size: 1.1rem; }
-    .chart-box { height: 80px; flex-shrink: 0; }
+
+    .stats-grid { gap: 8px; }
+    .stat-box { padding: 7px 4px; }
+    .stat-label { font-size: 0.55rem; margin-bottom: 3px; }
+    .stat-value { font-size: 0.8rem; }
+
+    .chart-box { height: 72px; flex-shrink: 0; }
+
     .result-actions { gap: 8px; }
-    .result-actions .btn { font-size: 0.75rem; padding: 9px 12px; }
+    .result-actions .btn { font-size: 0.72rem; padding: 9px 12px; }
+
+    /* 矮窗口：状态徽章与排名合并为一行，节省 50px 高度 */
+    .result-card .result-status {
+        width: auto;
+        min-width: 40%;
+        padding: 7px 14px;
+        gap: 8px;
+        animation: none;
+    }
+
+    .result-card .rank-display {
+        flex-direction: row;
+        gap: 10px;
+        animation: none;
+    }
+
+    .result-card .rank { line-height: 0.9; }
+
+    /* 主要成绩横向铺开 */
+    .result-card .primary-stats {
+        gap: 8px;
+        animation: none;
+    }
+
+    .result-card .stat-big { padding: 8px 8px; }
+    .result-card .stat-big .stat-label { margin-bottom: 4px; font-size: 0.6rem; }
+
+    .result-card .stats-grid { animation: none; }
+
+    /* 矮窗口：四个操作按钮合并为两行（主按钮一行 + 次按钮一行） */
+    .result-card .result-actions {
+        flex-direction: row;
+        flex-wrap: wrap;
+        animation: none;
+    }
+
+    .result-card .result-actions > .btn {
+        flex: 1 1 40%;
+    }
+
+    .result-card .result-actions .result-actions-row {
+        flex: 1 1 100%;
+    }
 
     /* ===== 排行榜：矮窗口全屏化 ===== */
     .lb-card {
