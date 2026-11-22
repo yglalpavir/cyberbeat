@@ -195,6 +195,21 @@
                 </div>
 
                 <div class="settings-group">
+                    <label class="settings-label">SKIN</label>
+                    <div class="style-selector">
+                        <button class="skin-btn active" data-skin="builtin" type="button">
+                            <span class="skin-preview skin-builtin"></span>
+                            BUILT-IN
+                        </button>
+                        <button class="skin-btn" data-skin="malody" type="button">
+                            <span class="skin-preview skin-malody"></span>
+                            MALODY V
+                        </button>
+                    </div>
+                    <div class="settings-hint" id="skinHint">MALODY V：Yuxen 4K 皮肤（assets/skins/yuxen，判定线高度由 HITPOSITION 控制）</div>
+                </div>
+
+                <div class="settings-group">
                     <label class="settings-label">SPEED</label>
                     <div class="speed-control">
                         <button class="speed-btn" id="speedDown">−</button>
@@ -397,6 +412,7 @@
     <script src="js/perf-monitor.js"></script>
     <script src="js/config.js"></script>
     <script src="js/settings-store.js"></script>
+    <script src="js/skin.js"></script>
     <script src="js/leaderboard.js"></script>
     <script src="js/game-state.js"></script>
     <script src="js/audio-engine.js"></script>

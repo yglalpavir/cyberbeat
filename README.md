@@ -14,6 +14,7 @@
 - **多难度系统**：EASY / EASY+ / NORMAL / NORMAL+ 四档难度
 - **扁平游玩 HUD**：曲名 / 艺术家 / 谱面难度、顶部播放进度条、实时分数与准确率、判定统计、生命值、连击放大、近期打击偏移条（EARLY / LATE）、低血量闪红边框
 - **音符样式**：FLAT（扁平块，默认）/ PIXEL（像素块），均为纯色块 + 1px 描边，可随时切换
+- **皮肤系统**：内置扁平皮肤 / **Malody V .mui 皮肤**（已接入 Yuxen 4K：轨道、音符、长条、判定线、COOL/GOOD/MISS 判定字），设置页一键切换
 - **视觉特效**：方块粒子、命中判定线加粗、判定文字动画、倒计时卡片
 - **实时性能监控**：按下 `` ` `` 键即可查看 FPS、帧时间、音频延迟
 - **数据驱动配置**：判定窗口、血量、音效参数均通过外部 JSON 配置，无需改代码
@@ -102,6 +103,54 @@ npx serve .
 - **后台保护**：切到后台自动暂停游戏；Web Audio 在部分浏览器不可用时给出提示
 - **防误触**：游戏内禁用双击缩放、长按菜单、双指捏合；设置页 / 排行榜内部列表保留正常滚动
 
+## 🎨 皮肤（Skin）
+
+游玩界面支持两套皮肤，在 `SETTING → SKIN` 切换，选择会写入本地存档：
+
+| 皮肤 | 说明 |
+| :---- | :---- |
+| `BUILT-IN` | 内置扁平皮肤：纯色块音符 + 1px 描边（默认） |
+| `MALODY V` | Malody V 4.3.x 的 `.mui` 脚本皮肤：Yuxen 4K（作者 Lowwy），接管轨道、音符、长条、判定线与 COOL/GOOD/MISS 判定字 |
+
+启用 Malody 皮肤后 `NOTE STYLE` 会置灰——音符形状由皮肤脚本决定，不再使用内置 FLAT/PIXEL 样式。
+
+### 已接入的皮肤包
+
+```text
+assets/skins/yuxen/
+├── base.mui                    # 公共图元（判定字、分数、血条、进度条）
+├── script-key-4K.mui           # 4K 轨道 / 音符 / 按键脚本（本作使用这份）
+├── script-key-{5,6,7}K.mui     # 5K/6K/7K 脚本（保留备用）
+├── Yassets.plist               # TexturePacker 图集描述（帧矩形 + 旋转标记）
+├── Yassets.png                 # 图集（2041×2045）
+├── YnoteL.png / YnoteT.png     # 长条体 / 尾端独立贴图（不在图集里）
+├── preview.json                # Malody 皮肤封面信息
+└── _How_to_Edit_HitPosition.txt# 原作者关于 HITPOSITION 的说明
+```
+
+### 支持能力（`.mui` 子集）
+
+- `@include` 合并、`@define` 变量、`{HITPOSITION}` 占位符
+- 元素选择器 `name-[1-4]` / `name-[1,3,5,7]` / `name-[4]`，同名元素后者覆盖前者
+- `pos` 中的 `$步进`（如 `50%-157.5$105`）换算轨道间距；`size` / `pos` 里的 `50%`、`100%-25`、`420+40` 表达式
+- 图元来源：`tex` / `tex2` / `tex3` / `frame`（`frame=Yjud/0-3` 取首帧），图集里没有的贴图按文件名从皮肤目录加载
+- `color`（白底贴图着色）与 `opacity`（百分比）
+- TexturePacker 图集的 `rotated` 旋转图元会自动还原；若某图元取反，可用 `js/skin.js` 顶部的 `SKIN_ATLAS_ROTATE_DIR` 调整还原方向
+
+### 判定线高度（HITPOSITION）
+
+`script-key-4K.mui` 顶部的 `@define HITPOSITION 72.5` 决定判定线位置：数值越大判定线越靠上（作者建议 37~150，可用小数）。
+
+本作的换算方式是 `判定线距顶部比例 = 1 − (HITPOSITION + 25) / 900`，再被底部触控键 + 安全区夹住——所以手机上判定线永远不会落进按键区。
+
+### 限制
+
+- 目前只接 4K：加载 `script-key-4K.mui`，5K/6K/7K 脚本随包保留但未启用
+- 皮肤接管的是赛道与判定表现；顶部进度条、分数、准确率、血条、连击仍用内置扁平 HUD（皮肤里的 `Yscore-*` 数字贴图 / `Ylife` 血条暂未使用）
+- 皮肤贴图需要静态服务器（`fetch` 加载 `.mui` 与 `.plist`），直接双击打开 `index.html` 会回退到内置皮肤
+
+> ⚠️ 该皮肤包自带声明：`do not use the scripts without permission`（作者 Lowwy / lowwy02）。本仓库接入仅供本地自用与研究；对外分发或二次发布前请先取得原作者授权。
+
 ## 📚 曲库
 
 ### 内置歌曲
@@ -185,7 +234,8 @@ cyberbeat/
 │   ├── config.js             # 游戏常量 + JSON 配置加载器 + 设备/触控检测
 │   ├── audio-engine.js       # Web Audio API 音频引擎
 │   ├── game-state.js         # 游戏状态管理
-│   ├── renderer.js           # Canvas 渲染器（轨道/音符/粒子/特效/HUD）
+│   ├── renderer.js           # Canvas 渲染器（轨道/音符/粒子/特效/HUD/皮肤绘制）
+│   ├── skin.js               # Malody V 皮肤加载器（.mui 解析 + plist 图集 + 着色缓存）
 │   ├── ui.js                 # UI 管理器（选曲/设置/结算/触控输入/暂停）
 │   ├── mc-parser.js          # Malody .mc 谱面解析器
 │   ├── midi-parser.js        # 标准 MIDI 文件解析器
@@ -196,9 +246,10 @@ cyberbeat/
 │   ├── audio.json            # 音频引擎参数
 │   └── judge.json            # 判定参数
 │
-├── docs/                     # 移动端适配验证截图
+├── docs/                     # 界面截图（扁平皮肤 / Malody 皮肤 / 移动端适配）
 │
 └── assets/
+    ├── skins/yuxen/          # Malody V 皮肤包（.mui 脚本 + plist 图集）
     ├── songs/                # MIDI / MC 谱面
     │   ├── menu.json         # 曲库清单
     │   ├── *.mid

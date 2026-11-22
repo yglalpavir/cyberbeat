@@ -1,0 +1,141 @@
+#Made by Lowwy
+#do not use the scripts without permission.
+@version 4.3.6
+@include base.mui
+@texpack Yassets
+
+
+
+#change the value on "@define HITPOSITION" to modify the Hit Position, a higher number moves the hit position up. (from 37 to 200) (I do not recommend exceeding 150).
+#you can use decimal numbers, for example: 72.7
+#(default Hitpos: 72.5)
+
+@define HITPOSITION 72.5
+
+
+
+
+
+
+
+#from here you have nothing to see or do, go away.
+
+_bg
+    tex=Ybg.png
+    size=525,100%
+    pos=50%,0
+    zindex=0
+    anchor=7
+
+bar
+    anchor=4
+    size=525+40,5
+    pos=50%,100%+25
+    pos2=50%,{HITPOSITION}-25
+    zindex=1
+    tex=Ybar5k.png
+
+_receptors-[1-5]
+    size=100,50
+    pos=50%-210$105,{HITPOSITION}
+    zindex=8
+    anchor=4
+    opacity=10
+_receptors-[1,5]
+    tex=Ynote1.png
+_receptors-[2,4]
+    tex=Ynote2.png
+_receptors-[3]
+    tex=Ynote3.png
+
+#size Xx4 = size Y
+press-[1-5]
+    anchor=7
+    frame=Ypress/0-0
+    frame2=Ypress/0-9
+    size=100,400
+    pos=50%-210$105,{HITPOSITION}-25
+    zindex=9
+    interval=10
+    opacity=35
+press-[1,5]
+    color=#947FFF
+press-[2,4]
+    color=#C9BFFF
+press-[3]
+    color=#FFBFFF
+
+#size Xx3 = size Y
+key-[1-5]
+    anchor=1
+    tex2=YhintP.png
+    size=100,300
+    pos=50%-210$105,{HITPOSITION}-25
+    zindex=21
+key-[1,5]
+    tex=Yhint1.png
+key-[2,4]
+    tex=Yhint2.png
+key-[3]
+    tex=Yhint3.png
+
+_bottom-[1-5]
+    size=100,50+{HITPOSITION}-25
+    pos=50%-210$105,-55
+    zindex=20
+    anchor=7
+_bottom-[1,5]
+    tex=Ybottom1.png
+_bottom-[2,4]
+    tex=Ybottom2.png
+_bottom-[3]
+    tex=Ybottom3.png
+
+_hide
+    tex=Ybg.png
+    size=525,50+{HITPOSITION}-25
+    pos=50%,-55
+    zindex=11
+    anchor=7
+
+note-[1-5]
+    anchor=4
+    type=2
+    tex2=YnoteL.png
+    tex3=YnoteT.png
+    size=100,50
+    pos=50%-210$105,100%+52.5
+	pos2=50%-210$105,{HITPOSITION}
+    toggle=1
+    zindex=10
+note-[1,5]
+    tex=Ynote1.png
+note-[2,4]
+    tex=Ynote2.png
+note-[3]
+    tex=Ynote3.png
+
+hit-[1-5]
+    anchor=4
+    frame=Ynothing/0-0
+    size=100,50
+    pos=50%-210$105,{HITPOSITION}
+    zindex=15
+    interval=20
+hit-[1,5]
+    frame2=Yhold1/0-0
+    frame3=Yhold1/0-0
+hit-[2,4]
+    frame2=Yhold2/0-0
+    frame3=Yhold2/0-0
+hit-[3]
+    frame2=Yhold3/0-0
+    frame3=Yhold3/0-0
+
+touch
+     type=1
+	 rect=0,0,20%,100%
+	 rect2=20%,0,20%,100%
+	 rect3=40%,0,20%,100%
+     rect4=60%,0,20%,100%
+     rect5=80%,0,20%,100%

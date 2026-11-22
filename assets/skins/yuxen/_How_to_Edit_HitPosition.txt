@@ -1,0 +1,58 @@
+English:
+hi ^^
+
+do you want to change the hit position?
+
+well, first you must open the "script-key" file in which you want to make the modification:
+
+"script-key-4K.mui" (for 4k)
+"script-key-5K.mui" (for 5k)
+"script-key-6K.mui" (for 6k)
+"script-key-7K.mui" (for 7k)
+
+then at the beginning of the script-key you must edit the value in "@define HITPOSITION" using numbers from 0 to 200 (I do not recommend exceeding 150).
+
+and that's it xD
+
+
+if you have any problem or doubt contact me on discord.
+
+Lowwy#4424
+lowwy02
+
+enjoy ^^
+
+
+||--------------------------------------------------------------------||
+
+
+Español:
+hola ^^ 
+
+quieres cambiar el hit position?
+
+bien, primero debes abrir el archivo "script-key" en el que quieres hacer la modificación:
+
+"script-key-4K.mui" (para 4k)
+"script-key-5K.mui" (para 5k)
+"script-key-6K.mui" (para 6k)
+"script-key-7K.mui" (para 7k)
+
+luego, al comienzo del script-key deberás editar el valor en "@define HITPOSITION" usando números del 0 al 200 (no recomiendo pasarse de 150).
+
+eso es todo xD
+
+
+si tienes algún problema o duda contáctame por discord.
+
+Lowwy#4424
+lowwy02
+
+chau ^^
+
+
+
+
+
+
+ඞ

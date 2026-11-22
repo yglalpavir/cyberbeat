@@ -152,6 +152,7 @@ class UIManager {
         this.pauseScore      = document.getElementById('pauseScore');
         this.pauseAcc        = document.getElementById('pauseAcc');
         this.pauseCombo      = document.getElementById('pauseCombo');
+        this.skinHint        = document.getElementById('skinHint');
     }
 
     // ========== 事件绑定 ==========
@@ -207,6 +208,14 @@ class UIManager {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.setNoteStyle(btn.dataset.style);
+            });
+        });
+
+        // 皮肤（Malody V / 内置扁平）
+        document.querySelectorAll('.skin-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.setSkin(btn.dataset.skin);
             });
         });
 
@@ -2261,6 +2270,16 @@ class UIManager {
             });
         }
 
+        // 应用皮肤选择（贴图在 main.js 启动时已预加载）
+        if (typeof skinMode !== 'undefined') {
+            const mode = (typeof activeSkin !== 'undefined' && activeSkin) ? 'malody' : 'builtin';
+            document.querySelectorAll('.skin-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.skin === mode);
+            });
+            // 未选中 Malody 时禁用音符样式（皮肤自带形状）
+            this._updateNoteStyleAvailability(mode);
+        }
+
         // 应用全局偏移
         if (s.audioOffset !== undefined && typeof audioOffsetMs !== 'undefined') {
             audioOffsetMs = s.audioOffset;
@@ -2401,6 +2420,58 @@ class UIManager {
         if (btn) btn.classList.add('active');
 
         this._syncSettingsToStore();
+    }
+
+    // ========== 皮肤切换 ==========
+    /**
+     * 切换游玩界面皮肤
+     * @param {'builtin'|'malody'} kind
+     */
+    async setSkin(kind) {
+        const btns = Array.from(document.querySelectorAll('.skin-btn'));
+        if (btns.some(b => b.disabled)) return;   // 正在切换
+        btns.forEach(b => { b.disabled = true; });
+        if (this.skinHint) this.skinHint.textContent = kind === 'malody' ? '皮肤载入中…' : '';
+
+        let skin = null;
+        try {
+            if (typeof switchSkin === 'function') {
+                skin = await switchSkin(kind);
+            } else if (kind === 'builtin') {
+                skin = null;
+            }
+        } catch (err) {
+            console.warn('切换皮肤失败：', err);
+            skin = null;
+        }
+
+        const active = (typeof skinMode !== 'undefined' && skinMode === 'malody' && skin) ? 'malody' : 'builtin';
+        btns.forEach(b => {
+            b.disabled = false;
+            b.classList.toggle('active', b.dataset.skin === active);
+        });
+        this._updateNoteStyleAvailability(active);
+        if (this.skinHint) {
+            this.skinHint.textContent = active === 'malody'
+                ? 'MALODY V：Yuxen 4K 皮肤（判定线高度由 HITPOSITION 控制）'
+                : '内置扁平皮肤（纯色块 + 1px 描边）';
+        }
+
+        if (renderer) {
+            renderer.setSkin(active === 'malody' ? skin : null);
+            repaintStartScreen();
+        }
+        this._syncSettingsToStore();
+    }
+
+    /** Malody 皮肤接管音符外观时，音符样式按钮置灰 */
+    _updateNoteStyleAvailability(mode) {
+        const disabled = mode === 'malody';
+        document.querySelectorAll('.style-btn').forEach(b => {
+            b.classList.toggle('is-disabled', disabled);
+            b.disabled = disabled;
+            b.title = disabled ? 'Malody 皮肤已接管音符外观' : '';
+        });
     }
 
     updateSpeedDisplay() {

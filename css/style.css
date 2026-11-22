@@ -868,6 +868,12 @@ select:focus-visible {
     color: var(--accent);
 }
 
+/* Malody 皮肤接管音符外观时，样式按钮置灰 */
+.style-btn.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* 样式预览 - 模拟游戏内音符（扁平纯色块） */
 .style-preview {
     width: 48px;
@@ -886,6 +892,80 @@ select:focus-visible {
 .style-pixel {
     border-radius: 0;
     border: 1px solid rgba(10, 10, 16, 0.35);
+}
+
+/* 皮肤选择：与音符样式按钮同一视觉语言 */
+.skin-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 10px;
+    font-family: var(--font-family);
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.skin-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.skin-btn.active {
+    border-color: var(--accent);
+    background: rgba(77, 171, 247, 0.1);
+    color: var(--accent);
+}
+
+.skin-btn:disabled {
+    opacity: 0.5;
+    cursor: progress;
+}
+
+/* 皮肤缩略：4K 轨道条 */
+.skin-preview {
+    width: 48px;
+    height: 22px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    padding: 0 1px;
+    position: relative;
+}
+
+.skin-preview::before,
+.skin-preview::after {
+    content: '';
+    flex: 1;
+    border-radius: 2px;
+}
+
+.skin-preview::before {
+    height: 60%;
+    background: var(--accent);
+}
+
+.skin-preview::after {
+    height: 60%;
+    background: rgba(77, 171, 247, 0.55);
+}
+
+.skin-builtin::before,
+.skin-builtin::after {
+    box-shadow: inset 0 0 0 1px rgba(10, 10, 16, 0.4);
+}
+
+.skin-malody::before {
+    background: #947FFF;
+}
+
+.skin-malody::after {
+    background: #C9BFFF;
 }
 
 /* 速度 */

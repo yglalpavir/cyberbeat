@@ -38,6 +38,11 @@ class Renderer {
         this._lastCombo = 0;
         this._songInfo = null;                 // { title, artist, difficulty }
 
+        // 皮肤（Malody V）：null = 内置扁平皮肤
+        this.skin = null;
+        this._skinScale = 1;
+        this._accent = '#4dabf7';
+
         // 预计算轨道坐标
         this.trackPositions = [];   // [{x, cx, hitX, hitW}]
 
@@ -105,18 +110,43 @@ class Renderer {
         const gap = this.canvasWidth < 480 ? 8 : 12;
         const sidePadding = this.canvasWidth < 480 ? 20 : 32;
         const availableWidth = this.canvasWidth - sidePadding;
-        const fittedWidth = Math.floor((availableWidth - gap * (CONFIG.trackCount - 1)) / CONFIG.trackCount);
-        CONFIG.trackWidth = Math.max(44, Math.min(80, fittedWidth));
-        CONFIG.trackSpacing = gap;
+
+        if (this.skin) {
+            // Malody 皮肤：轨道宽度/间距由皮肤脚本决定（4K = 100 宽 + 5 间距，整块 420）
+            // 上限 1.0：设计单位 1:1 绘制，宽屏下不再放大成巨型轨道
+            const layout = this.skin.layout;
+            const fieldUnits = layout.laneWidth * CONFIG.trackCount + layout.laneGap * (CONFIG.trackCount - 1);
+            const scale = Math.max(0.5, Math.min(availableWidth / fieldUnits, 1));
+            this._skinScale = scale;
+            CONFIG.trackWidth = Math.round(layout.laneWidth * scale);
+            CONFIG.trackSpacing = Math.max(0, Math.round(layout.laneGap * scale));
+        } else {
+            const fittedWidth = Math.floor((availableWidth - gap * (CONFIG.trackCount - 1)) / CONFIG.trackCount);
+            CONFIG.trackWidth = Math.max(44, Math.min(80, fittedWidth));
+            CONFIG.trackSpacing = gap;
+            this._skinScale = 1;
+        }
 
         const totalTrackWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * CONFIG.trackSpacing;
         this.trackStartX = (this.canvasWidth - totalTrackWidth) / 2;
 
-        // playfield 两侧留白：桌面 12px，窄屏按剩余空间收缩，保证不超出画布
-        this._fieldPad = Math.min(12, Math.max(0, (this.canvasWidth - totalTrackWidth) / 2 - 2));
+        if (this.skin) {
+            // 皮肤判定线两侧的留白（bar 比 field 宽 40 单位）
+            const barPad = Math.max(0, (this.skin.layout.barWidth - this.skin.layout.fieldWidth) / 2) * this._skinScale;
+            this._fieldPad = Math.min(barPad, Math.max(0, (this.canvasWidth - totalTrackWidth) / 2 - 1));
+        } else {
+            // playfield 两侧留白：桌面 12px，窄屏按剩余空间收缩，保证不超出画布
+            this._fieldPad = Math.min(12, Math.max(0, (this.canvasWidth - totalTrackWidth) / 2 - 2));
+        }
+        this._fieldWidth = totalTrackWidth + this._fieldPad * 2;
+
+        // 皮肤判定线贴图实际宽度（窄屏夹到画布内）
+        this._barW = this.skin
+            ? Math.min(this.skin.layout.barWidth * this._skinScale, this.canvasWidth - 4)
+            : this._fieldWidth;
 
         // 让底部触控键与 playfield 同宽（CSS 读取此变量）
-        document.documentElement.style.setProperty('--playfield-width', (totalTrackWidth + this._fieldPad * 2) + 'px');
+        document.documentElement.style.setProperty('--playfield-width', this._fieldWidth + 'px');
 
         // 预计算轨道坐标
         this.trackPositions.length = 0;
@@ -134,7 +164,10 @@ class Renderer {
         this._controlsHeight = IS_TOUCH_DEVICE ? (this.canvasHeight <= 520 ? 68 : 92) : 0;
         const reservedBottom = this._controlsHeight + this._safeBottom + 12;
         const availableHeight = Math.max(180, this.canvasHeight - reservedBottom);
-        const desiredY = this.canvasHeight * CONFIG.judgmentLineY;
+        // 内置皮肤用 CONFIG.judgmentLineY；Malody 皮肤由脚本的 HITPOSITION 决定（越大越靠上）
+        const desiredY = this.skin
+            ? reservedBottom + (this.canvasHeight - reservedBottom) * this.skin.hitFraction
+            : this.canvasHeight * CONFIG.judgmentLineY;
         const maxY = Math.max(120, availableHeight - 18);
         this._judgmentY = Math.min(Math.max(availableHeight * 0.62, Math.min(desiredY, maxY)), this.canvasHeight - 40);
 
@@ -160,6 +193,18 @@ class Renderer {
         this._songInfo = info || null;
     }
 
+    /**
+     * 启用/关闭 Malody 皮肤
+     * @param {MalodySkin|null} skin
+     */
+    setSkin(skin) {
+        this.skin = skin || null;
+        this.spritesReady = !!(skin && skin.isPlayfieldReady);
+        this._accent = skin ? skin.accentColor : '#4dabf7';
+        // 轨道几何与判定线依赖皮肤布局，重新计算
+        this.resize();
+    }
+
     // ========== 背景（扁平纯色） ==========
     drawBackground(time) {
         const ctx = this.ctx;
@@ -168,25 +213,94 @@ class Renderer {
         ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
 
-    // ========== 轨道（扁平色块） ==========
+    // ========== 轨道（扁平色块 / Malody 皮肤） ==========
     drawTracks() {
-        const ctx = this.ctx;
-        const positions = this.trackPositions;
-        const trackW = CONFIG.trackWidth;
-        const h = this.canvasHeight;
-        const judgmentY = this._judgmentY;
-        const totalWidth = trackW * CONFIG.trackCount + CONFIG.trackSpacing * (CONFIG.trackCount - 1);
-        const fieldX = this.trackStartX - this._fieldPad;
-        const fieldW = totalWidth + this._fieldPad * 2;
         const scale = this._dt / 16.67;
 
-        // 命中闪光 / 判定线脉冲衰减
+        // 命中闪光 / 判定线脉冲衰减（两种皮肤共用）
         for (let i = 0; i < this._laneFlash.length; i++) {
             if (this._laneFlash[i] > 0) {
                 this._laneFlash[i] = Math.max(0, this._laneFlash[i] - 0.075 * scale);
             }
         }
         if (this._hitPulse > 0) this._hitPulse = Math.max(0, this._hitPulse - 0.08 * scale);
+
+        if (this.skin && this.spritesReady) {
+            this._drawSkinTracks();
+            return;
+        }
+        this._drawFlatTracks();
+    }
+
+    /** Malody 皮肤：背景板 / 底部填充 / 键位列 / 按下列 / 接收器 / 判定线 */
+    _drawSkinTracks() {
+        const ctx = this.ctx;
+        const skin = this.skin;
+        const s = this._skinScale;
+        const positions = this.trackPositions;
+        const trackW = CONFIG.trackWidth;
+        const h = this.canvasHeight;
+        const jy = this._judgmentY;
+        const fieldX = this.trackStartX - this._fieldPad;
+        const fieldW = this._fieldWidth;
+        const layout = skin.layout;
+
+        // 1. 轨道底板（Ybg 铺满 playfield）
+        skin.drawSprite(ctx, 'Ybg', fieldX, 0, fieldW, h);
+
+        // 2. 判定线以下：底部填充贴图
+        const bottomH = Math.max(0, h - jy);
+        for (let i = 0; i < positions.length; i++) {
+            skin.drawLaneSprite(ctx, '_bottom', i, positions[i].x, jy, trackW, bottomH);
+        }
+
+        // 3. 键位提示列（贴图本身很淡，只做轨道轮廓）
+        const keyH = layout.keyHeight * s;
+        for (let i = 0; i < positions.length; i++) {
+            skin.drawLaneSprite(ctx, 'key', i, positions[i].x, jy - keyH, trackW, keyH);
+        }
+
+        // 4. 按下列：白底贴图按轨道色着色，opacity 来自脚本（35%）
+        const pressH = layout.pressHeight * s;
+        for (let i = 0; i < positions.length; i++) {
+            if (!gameState.pressedKeys.has(KEYS[i])) continue;
+            skin.drawLaneSprite(ctx, 'press', i, positions[i].x, jy - pressH, trackW, pressH, {
+                useElementColor: true,
+                useElementOpacity: true
+            });
+        }
+
+        // 5. 接收器：判定线处的音符剪影（opacity 10%）
+        const noteH = layout.noteHeight * s;
+        for (let i = 0; i < positions.length; i++) {
+            const flash = this._laneFlash[i];
+            skin.drawLaneSprite(ctx, '_receptors', i, positions[i].x, jy - noteH / 2, trackW, noteH, {
+                useElementOpacity: true,
+                alpha: 1 + flash * 4
+            });
+        }
+
+        // 6. 判定线：Ybar4k（bar 比 field 宽，居中绘制；窄屏下夹到画布内）
+        const barW = this._barW;
+        const barH = Math.max(2, layout.barHeight * s);
+        const barX = this.canvasWidth / 2 - barW / 2;
+        const barY = jy - barH / 2;
+        if (!skin.drawSprite(ctx, 'Ybar4k', barX, barY, barW, barH, { alpha: 1 })) {
+            // 兜底：贴图缺失时画一条纯色线
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.fillRect(fieldX, Math.round(jy) - 1, fieldW, 2);
+        }
+    }
+
+    /** 内置扁平皮肤：纯色块轨道 */
+    _drawFlatTracks() {
+        const ctx = this.ctx;
+        const positions = this.trackPositions;
+        const trackW = CONFIG.trackWidth;
+        const h = this.canvasHeight;
+        const judgmentY = this._judgmentY;
+        const fieldX = this.trackStartX - this._fieldPad;
+        const fieldW = this._fieldWidth;
 
         // 轨道区：纯色块 + 交替轨底色
         ctx.fillStyle = FLAT_PALETTE.field;
@@ -373,7 +487,7 @@ class Renderer {
                 const visYTop = yTop > -50 ? yTop : -50;
                 const visYBot = yBottom < canvasH ? yBottom : canvasH;
 
-                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], note.holdActive, holdProgress);
+                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], note.holdActive, holdProgress, note.track);
                 visibleCount++;
                 continue;
             }
@@ -403,7 +517,7 @@ class Renderer {
 
             // 可见 → 绘制
             note.y = rawY;
-            this._drawNoteByStyle(positions[note.track].x, rawY, colors[note.track]);
+            this._drawNoteByStyle(positions[note.track].x, rawY, colors[note.track], note.track);
             visibleCount++;
         }
 
@@ -412,12 +526,19 @@ class Renderer {
     }
 
     /**
-     * 绘制 Hold 长条体（扁平：实色块 + 1px 描边）
+     * 绘制 Hold 长条体
+     * 内置扁平：实色块 + 1px 描边；Malody 皮肤：YnoteL 长条体 + YnoteT 尾部
      * @param {boolean} isActive - 是否按住中
-     * @param {number} holdProgress - 按住进度 0~1（未按住时为 0），
-     *   按住中时用一块实色已判定区表示进度，不做渐变过渡
+     * @param {number} holdProgress - 按住进度 0~1（未按住时为 0）
+     * @param {number} [track] - 轨道索引（皮肤按轨道取贴图）
      */
-    _drawHoldBody(x, yTop, yBottom, color, isActive, holdProgress = 0) {
+    _drawHoldBody(x, yTop, yBottom, color, isActive, holdProgress = 0, track = 0) {
+        const skin = this.skin;
+        if (skin && this.spritesReady) {
+            this._drawSkinHoldBody(x, yTop, yBottom, isActive, holdProgress, track);
+            return;
+        }
+
         const ctx = this.ctx;
         const trackW = CONFIG.trackWidth;
         const bodyW = trackW - 8;
@@ -447,7 +568,7 @@ class Renderer {
 
         // 头部（判定线一侧）：与 Tap 同款扁平块
         if (yBottom > -50 && yBottom < this.canvasHeight) {
-            this._drawNoteByStyle(x, yBottom, color);
+            this._drawNoteByStyle(x, yBottom, color, track);
         }
 
         // 尾部：较薄的扁平块
@@ -466,7 +587,52 @@ class Renderer {
         }
     }
 
-    _drawNoteByStyle(x, y, color) {
+    /** Malody 皮肤长条：tex2=YnoteL 长条体，tex3=YnoteT 尾端，头部用音符贴图 */
+    _drawSkinHoldBody(x, yTop, yBottom, isActive, holdProgress, track) {
+        const ctx = this.ctx;
+        const skin = this.skin;
+        const s = this._skinScale;
+        const noteH = skin.layout.noteHeight * s;
+        const tailH = Math.min(noteH, Math.max(10, noteH * 0.6));
+        const bodyTop = yTop + tailH;
+        const bodyH = yBottom - bodyTop;
+
+        if (bodyH > 0) {
+            const bodyName = skin.spriteNameOf(skin.laneElement('note', track), ['tex2']) || 'YnoteL';
+            // 底：半透明长条体
+            skin.drawSprite(ctx, bodyName, x, bodyTop, CONFIG.trackWidth, bodyH, { alpha: 0.6 });
+            // 按住中：已判定的部分再画一层全不透明，表示进度
+            if (isActive && holdProgress > 0) {
+                const litH = Math.max(2, bodyH * Math.min(1, holdProgress));
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(x, yBottom - litH, CONFIG.trackWidth, litH);
+                ctx.clip();
+                skin.drawSprite(ctx, bodyName, x, bodyTop, CONFIG.trackWidth, bodyH, { alpha: 1 });
+                ctx.restore();
+            }
+        }
+
+        // 头部
+        if (yBottom > -50 && yBottom < this.canvasHeight) {
+            this._drawNoteByStyle(x, yBottom, '#947FFF', track);
+        }
+
+        // 尾巴
+        if (yTop > -50 && yTop < this.canvasHeight) {
+            const tailName = skin.spriteNameOf(skin.laneElement('note', track), ['tex3']) || 'YnoteT';
+            skin.drawSprite(ctx, tailName, x, yTop, CONFIG.trackWidth, tailH, { alpha: 0.85 });
+        }
+    }
+
+    _drawNoteByStyle(x, y, color, track = 0) {
+        const skin = this.skin;
+        if (skin && this.spritesReady) {
+            const noteH = skin.layout.noteHeight * this._skinScale;
+            const name = skin.spriteNameOf(skin.laneElement('note', track), ['tex']);
+            if (name && skin.drawSprite(this.ctx, name, x, y + (24 - noteH) / 2, CONFIG.trackWidth, noteH)) return;
+        }
+
         const ctx = this.ctx;
         const w = CONFIG.trackWidth - 6;
         const h = 24;
@@ -496,7 +662,7 @@ class Renderer {
         const h = this.canvasHeight;
         const centerX = w / 2;
         const centerY = h * 0.46;
-        const color = resumeMode ? '#69db7c' : '#4dabf7';
+        const color = resumeMode ? '#69db7c' : this._accent;
         const radius = (resumeMode ? 44 : 56) * Math.max(0.85, s);
         const fontSize = (resumeMode ? 42 : 54) * Math.max(0.85, s);
 
@@ -651,6 +817,8 @@ class Renderer {
         const cx = this.trackPositions[track].cx;
         const count = CONFIG.effects.particleCount;
         const speed = CONFIG.effects.particleSpeed;
+        // 皮肤模式：粒子使用皮肤轨道色，保持整体配色统一
+        const pColor = (this.skin && this.spritesReady) ? this.skin.laneColor(track) : color;
         for (let i = 0; i < count; i++) {
             const angle = (Math.PI * 2 * i) / count;
             const p = this._getParticle();
@@ -658,7 +826,7 @@ class Renderer {
             p.vx = Math.cos(angle) * speed;
             p.vy = Math.sin(angle) * speed;
             p.size = 8;
-            p.color = color;
+            p.color = pColor;
             p.life = 1.0;
             p.active = true;
             p.timeElapsed = 0;
@@ -764,6 +932,16 @@ class Renderer {
             pool[validCount++] = j;
 
             const x = positions[j.track].cx;
+
+            // Malody 皮肤：COOL / GOOD / MISS 贴图
+            if (this.skin && this.spritesReady) {
+                const names = { PERFECT: 'Yjud-1', GREAT: 'Yjud-2', MISS: 'Yjud-3' };
+                const spriteName = names[j.text] || 'Yjud-3';
+                const lw = this.skin.layout.judgeWidth * this._skinScale * j.bounce;
+                const lh = this.skin.layout.judgeHeight * this._skinScale * j.bounce;
+                if (this.skin.drawSprite(ctx, spriteName, x - lw / 2, j.y - lh / 2, lw, lh, { alpha: j.alpha })) continue;
+            }
+
             const isPerfect = j.text === 'PERFECT';
             const isGreat = j.text === 'GREAT';
             const color = isPerfect ? '#ffd43b' : isGreat ? '#69db7c' : '#ff6b6b';
@@ -775,6 +953,7 @@ class Renderer {
             // 扁平：纯色文字，无发光
             ctx.fillStyle = color;
             ctx.fillText(j.text, x, j.y);
+            ctx.globalAlpha = 1.0;
         }
         this._judgmentPoolIdx = validCount;
         ctx.globalAlpha = 1.0;
@@ -966,7 +1145,7 @@ class Renderer {
 
         // 已播放部分：单色实心条
         const playedW = Math.round(w * p);
-        ctx.fillStyle = '#4dabf7';
+        ctx.fillStyle = this._accent;
         ctx.fillRect(x, y, playedW, barH);
 
         // 播放头：2px 方形块

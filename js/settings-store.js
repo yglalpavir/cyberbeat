@@ -7,6 +7,7 @@ const DEFAULT_SETTINGS = {
     noteSpeed: 16.0,
     volume: 4,
     noteStyle: 'bar',
+    skin: 'builtin',        // 'builtin' | 'malody'
     difficulty: 'normal+',
     audioOffset: 0,
     touchFeedback: true
@@ -50,6 +51,8 @@ class SettingsStore {
         if (this._settings.noteStyle === 'orb' || !this._settings.noteStyle) {
             this._settings.noteStyle = 'bar';
         }
+        // 皮肤设置只允许已知取值
+        if (this._settings.skin !== 'malody') this._settings.skin = 'builtin';
         return this._settings;
     }
 
@@ -98,6 +101,9 @@ class SettingsStore {
         if (s.noteStyle !== undefined) {
             noteStyle = s.noteStyle;
         }
+        if (s.skin !== undefined && typeof skinMode !== 'undefined') {
+            skinMode = s.skin === 'malody' ? 'malody' : 'builtin';
+        }
         if (s.difficulty !== undefined) {
             selectedDifficulty = s.difficulty;
         }
@@ -118,6 +124,7 @@ class SettingsStore {
             noteSpeed: noteSpeed,
             volume: currentVolume,
             noteStyle: noteStyle,
+            skin: typeof skinMode !== 'undefined' ? skinMode : 'builtin',
             difficulty: selectedDifficulty,
             audioOffset: typeof audioOffsetMs !== 'undefined' ? audioOffsetMs : 0,
             touchFeedback: typeof touchFeedbackEnabled !== 'undefined' ? touchFeedbackEnabled : true

@@ -1,0 +1,155 @@
+#Made by Lowwy
+#do not use the scripts without permission.
+@texpack Yassets
+
+:fade
+    name=f,from=100%,to=100%,atime=(-2500,-1300)
+    name=f,from=100%,to=0%,atime=(-900,-300)
+
+judge-1
+    anchor=4
+    size=175,42
+    pos=50%,325
+    zindex=100
+    frame=Yjud/0-3
+    interval=20
+    type=1
+
+score-combo
+    frame=Yscore/0-9
+    anchor=4
+    fsize=30
+    pos=50%,470
+    pos2=1.0px,0
+    zindex=100
+
+score-acc
+    frame=Yscore/0-11
+    anchor=5
+    fsize=20
+    pos=50%+64,425
+    pos2=1.0px,0
+    zindex=100
+
+score-score
+    frame=Yscore/0-9
+    anchor=2
+    fsize=27
+    pos=100%-30,100%-25
+    pos2=1.0px,0
+    interval=200
+    zindex=100
+
+hit-fast
+    frame=Yfs/0-0
+    size=60,60
+    pos=50%-85,467
+    anchor=4
+    interval=100
+    zindex=100
+    flip=0
+hit-slow
+    frame=Yfs/0-0
+    size=60,60
+    pos=50%+85,467
+    anchor=4
+    interval=100
+    zindex=100
+
+progress
+    anchor=4
+    type=0
+    tex=Yprogress.png
+    size=60,6
+    pos=50%,390
+	zindex=110
+_progressbg
+    anchor=4
+    tex=Yprogress.png
+    size=60,6
+    pos=50%,390
+    zindex=100
+    opacity=30
+
+#info
+
+_title
+	anchor=4
+	type=1
+	text={title}
+	pos=50%,320
+	fsize=25
+	color=#947FFF
+	motion=fade
+	opacity=0
+	zindex=100
+
+_artist
+	anchor=4
+	type=1
+	text={artist}
+	pos=50%,290
+	fsize=25
+	color=#C9BFFF
+	motion=fade
+	opacity=0
+	zindex=100
+
+_version
+	anchor=4
+	type=1
+	text=[{version}]
+	pos=50%,260
+	fsize=25
+	color=#FFFFFF
+	motion=fade
+	opacity=0
+	zindex=100
+
+_creator
+	anchor=4
+	type=1
+	text=Mapped By: "{creator}"
+	pos=50%,230
+	fsize=20
+	color=#FFFFFF
+	motion=fade
+	opacity=0
+	zindex=100
+
+_player
+	anchor=4
+	type=1
+	text=Player: "{player}"
+	pos=50%,200
+	fsize=20
+	color=#FFFFFF
+	motion=fade
+	opacity=0
+	zindex=100
+
+#lifebar
+
+_scorebar-bg
+    anchor=0
+    size=200,10
+    pos=75,100%-25
+    zindex=110
+    tex=Ylife.png
+    opacity=25
+score-hp
+    anchor=0
+    size=200,10
+    pos=75,100%-25
+    zindex=120
+    tex=Ylife.png
+    type=0
+
+_lifetext
+	anchor=0
+	type=1
+	text=Life
+	pos=75,100%-33
+	fsize=25
+	color=#F4F2FF
+	zindex=100

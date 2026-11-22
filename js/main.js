@@ -9,9 +9,13 @@ async function init() {
     await loadAudioConfig();
     await loadJudgeConfig();
 
+    // 皮肤：按存档设置预加载（失败自动回退内置扁平皮肤）
+    const skin = await initSkinFromSettings();
+
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     renderer = new Renderer(canvas, ctx);
+    if (skin) renderer.setSkin(skin);
     ui = new UIManager();
 
     // 防止 canvas 被浏览器默认手势干扰
