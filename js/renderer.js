@@ -15,6 +15,14 @@ const FLAT_PALETTE = {
     track: 'rgba(255, 255, 255, 0.1)'
 };
 
+// 皮肤绘制取舍（Malody 皮肤只取赛道 / 音符 / 长条）：
+//   useSkinJudgments=false  判定文字用本项目样式（PERFECT / GREAT / MISS），不画皮肤 Yjud 贴图
+//   showBar=false           隐藏判定线（不画皮肤 Ybar4k）；接收器与判定位置仍保留
+const SKIN_DRAW = {
+    useSkinJudgments: false,
+    showBar: false
+};
+
 class Renderer {
     constructor(canvas, ctx) {
         this.canvas = canvas;
@@ -280,15 +288,17 @@ class Renderer {
             });
         }
 
-        // 6. 判定线：Ybar4k（bar 比 field 宽，居中绘制；窄屏下夹到画布内）
-        const barW = this._barW;
-        const barH = Math.max(2, layout.barHeight * s);
-        const barX = this.canvasWidth / 2 - barW / 2;
-        const barY = jy - barH / 2;
-        if (!skin.drawSprite(ctx, 'Ybar4k', barX, barY, barW, barH, { alpha: 1 })) {
-            // 兜底：贴图缺失时画一条纯色线
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-            ctx.fillRect(fieldX, Math.round(jy) - 1, fieldW, 2);
+        // 6. 判定线：默认隐藏（SKIN_DRAW.showBar=false），只保留接收器标出判定位置
+        if (SKIN_DRAW.showBar) {
+            const barW = this._barW;
+            const barH = Math.max(2, layout.barHeight * s);
+            const barX = this.canvasWidth / 2 - barW / 2;
+            const barY = jy - barH / 2;
+            if (!skin.drawSprite(ctx, 'Ybar4k', barX, barY, barW, barH, { alpha: 1 })) {
+                // 兜底：贴图缺失时画一条纯色线
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                ctx.fillRect(fieldX, Math.round(jy) - 1, fieldW, 2);
+            }
         }
     }
 
@@ -933,8 +943,8 @@ class Renderer {
 
             const x = positions[j.track].cx;
 
-            // Malody 皮肤：COOL / GOOD / MISS 贴图
-            if (this.skin && this.spritesReady) {
+            // Malody 皮肤判定贴图（默认关闭：判定文字统一用本项目样式）
+            if (SKIN_DRAW.useSkinJudgments && this.skin && this.spritesReady) {
                 const names = { PERFECT: 'Yjud-1', GREAT: 'Yjud-2', MISS: 'Yjud-3' };
                 const spriteName = names[j.text] || 'Yjud-3';
                 const lw = this.skin.layout.judgeWidth * this._skinScale * j.bounce;
