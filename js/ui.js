@@ -180,20 +180,14 @@ class UIManager {
         // 排行榜面板事件
         this._setupLeaderboardEvents();
 
-        // 速度
+        // 速度（支持长按连发：按住 500ms 后每 100ms 重复一步，松开停止）
         const speedUpBtn = document.getElementById('speedUp');
         const speedDownBtn = document.getElementById('speedDown');
         if (speedUpBtn) {
-            speedUpBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.changeSpeed(SPEED_STEP);
-            });
+            this._bindSpeedButton(speedUpBtn, SPEED_STEP);
         }
         if (speedDownBtn) {
-            speedDownBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.changeSpeed(-SPEED_STEP);
-            });
+            this._bindSpeedButton(speedDownBtn, -SPEED_STEP);
         }
 
         // 难度
@@ -2199,6 +2193,50 @@ class UIManager {
         noteSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, noteSpeed));
         this.updateSpeedDisplay();
         this._syncSettingsToStore();
+    }
+
+    /**
+     * 绑定速度按钮：单击 ±1 步，长按 500ms 后每 100ms 连发。
+     * pointerdown/up 兼容触屏与鼠标；到达上下限时自动停止连发。
+     */
+    _bindSpeedButton(btn, delta) {
+        if (btn.dataset.speedBound === '1') return;   // 防止重复绑定
+        btn.dataset.speedBound = '1';
+
+        let repeatTimer = null;
+        let holdTimeout = null;
+
+        const stopRepeat = () => {
+            if (holdTimeout) { clearTimeout(holdTimeout); holdTimeout = null; }
+            if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+        };
+
+        btn.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            this.changeSpeed(delta);
+
+            // 长按连发：500ms 延迟后启动，100ms 间隔
+            holdTimeout = setTimeout(() => {
+                repeatTimer = setInterval(() => {
+                    // 到达边界时自动停止
+                    const atMax = delta > 0 && noteSpeed >= MAX_SPEED;
+                    const atMin = delta < 0 && noteSpeed <= MIN_SPEED;
+                    if (atMax || atMin) {
+                        stopRepeat();
+                        return;
+                    }
+                    this.changeSpeed(delta);
+                }, 100);
+            }, 500);
+        });
+
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(evt => {
+            btn.addEventListener(evt, stopRepeat);
+        });
+        // 防止长按呼出菜单 / 双击缩放
+        btn.addEventListener('contextmenu', (e) => e.preventDefault());
+        btn.addEventListener('dblclick', (e) => e.preventDefault());
     }
 
     setDifficulty(diff) {
