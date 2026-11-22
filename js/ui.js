@@ -2054,6 +2054,7 @@ class UIManager {
 
         this.startScreen.classList.add('hidden');
         this.settingsScreen.classList.remove('hidden');
+        this._enterAnim('.settings-card');
     }
 
     /**
@@ -2106,6 +2107,8 @@ class UIManager {
     hideSettings() {
         this.settingsScreen.classList.add('hidden');
         this.startScreen.classList.remove('hidden');
+        this._enterAnim('.start-layout');
+        repaintStartScreen();
     }
 
     // ========== 游戏开始 ==========
@@ -2410,12 +2413,38 @@ class UIManager {
         }
 
         this.resultScreen.classList.remove('hidden');
+        this._enterResult();
 
         // 保存游玩记录到本地排行榜
         this._saveToLeaderboard(accuracy, rank, isGameFailed);
 
         // 播放结算音乐
         this.playResultAudio(isGameFailed);
+    }
+
+    // ========== 进场动效 ==========
+    /**
+     * 重新触发某个容器的入场动画（先移除再强制回流，允许重复播放）
+     * @param {string|Element} target 选择器或元素
+     */
+    _enterAnim(target) {
+        const el = typeof target === 'string' ? document.querySelector(target) : target;
+        if (!el) return;
+        el.classList.remove('enter-anim');
+        void el.offsetWidth;   // 强制一次布局，让动画可重放
+        el.classList.add('enter-anim');
+    }
+
+    /** 结算页入场：卡片上浮 + 等级弹跳 */
+    _enterResult() {
+        const card = document.getElementById('resultCard');
+        if (!card) return;
+        card.classList.remove('result-enter');
+        void card.offsetWidth;
+        card.classList.add('result-enter');
+        this._enterAnim(card);
+        if (this._resultEnterTimer) clearTimeout(this._resultEnterTimer);
+        this._resultEnterTimer = setTimeout(() => card.classList.remove('result-enter'), 600);
     }
 
     // ========== 保存记录到排行榜 ==========
@@ -2506,6 +2535,7 @@ class UIManager {
         if (this.oszPicker) this.oszPicker.classList.add('hidden');
         // 显示开始画面（静态背景，绘制一帧即可）
         this.startScreen.classList.remove('hidden');
+        this._enterAnim('.start-layout');
         repaintStartScreen();
     }
 
@@ -3420,6 +3450,7 @@ class UIManager {
 
         if (this.leaderboardScreen) {
             this.leaderboardScreen.classList.remove('hidden');
+            this._enterAnim('.lb-card');
         }
     }
 

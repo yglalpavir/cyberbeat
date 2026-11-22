@@ -202,81 +202,83 @@
                     <div class="toast-track" id="audioStatusTrack"><div class="toast-fill" id="audioStatusFill"></div></div>
                 </div>
 
-                <div class="settings-group" id="difficultyGroup">
-                    <label class="settings-label">DIFFICULTY</label>
-                    <div class="diff-selector">
-                        <button class="diff-btn" data-diff="easy">EASY</button>
-                        <button class="diff-btn" data-diff="easy+">EASY+</button>
-                        <button class="diff-btn" data-diff="normal">NORMAL</button>
-                        <button class="diff-btn active" data-diff="normal+">NORMAL+</button>
+                <div class="settings-body" id="settingsBody">
+                    <div class="settings-group" id="difficultyGroup">
+                        <label class="settings-label">DIFFICULTY</label>
+                        <div class="diff-selector">
+                            <button class="diff-btn" data-diff="easy">EASY</button>
+                            <button class="diff-btn" data-diff="easy+">EASY+</button>
+                            <button class="diff-btn" data-diff="normal">NORMAL</button>
+                            <button class="diff-btn active" data-diff="normal+">NORMAL+</button>
+                        </div>
                     </div>
-                </div>
 
-                <div class="settings-group">
-                    <label class="settings-label">NOTE STYLE</label>
-                    <div class="style-selector">
-                        <button class="style-btn active" data-style="bar">
-                            <span class="style-preview style-flat"></span>
-                            FLAT
-                        </button>
-                        <button class="style-btn" data-style="pixel">
-                            <span class="style-preview style-pixel"></span>
-                            PIXEL
-                        </button>
+                    <div class="settings-group">
+                        <label class="settings-label">NOTE STYLE</label>
+                        <div class="style-selector">
+                            <button class="style-btn active" data-style="bar">
+                                <span class="style-preview style-flat"></span>
+                                FLAT
+                            </button>
+                            <button class="style-btn" data-style="pixel">
+                                <span class="style-preview style-pixel"></span>
+                                PIXEL
+                            </button>
+                        </div>
                     </div>
-                </div>
 
-                <div class="settings-group">
-                    <label class="settings-label">SKIN</label>
-                    <div class="style-selector">
-                        <button class="skin-btn active" data-skin="builtin" type="button">
-                            <span class="skin-preview skin-builtin"></span>
-                            BUILT-IN
-                        </button>
-                        <button class="skin-btn" data-skin="malody" type="button">
-                            <span class="skin-preview skin-malody"></span>
-                            MALODY V
-                        </button>
+                    <div class="settings-group">
+                        <label class="settings-label">SKIN</label>
+                        <div class="style-selector">
+                            <button class="skin-btn active" data-skin="builtin" type="button">
+                                <span class="skin-preview skin-builtin"></span>
+                                BUILT-IN
+                            </button>
+                            <button class="skin-btn" data-skin="malody" type="button">
+                                <span class="skin-preview skin-malody"></span>
+                                MALODY V
+                            </button>
+                        </div>
+                        <div class="settings-hint" id="skinHint">MALODY V：Yuxen 4K 皮肤（assets/skins/yuxen，判定线高度由 HITPOSITION 控制）</div>
                     </div>
-                    <div class="settings-hint" id="skinHint">MALODY V：Yuxen 4K 皮肤（assets/skins/yuxen，判定线高度由 HITPOSITION 控制）</div>
-                </div>
 
-                <div class="settings-group">
-                    <label class="settings-label">SPEED</label>
-                    <div class="speed-control">
-                        <button class="speed-btn" id="speedDown">−</button>
-                        <span class="speed-value" id="speedValue">16.0</span>
-                        <button class="speed-btn" id="speedUp">+</button>
+                    <div class="settings-group">
+                        <label class="settings-label">SPEED</label>
+                        <div class="speed-control">
+                            <button class="speed-btn" id="speedDown">−</button>
+                            <span class="speed-value" id="speedValue">16.0</span>
+                            <button class="speed-btn" id="speedUp">+</button>
+                        </div>
                     </div>
-                </div>
 
-                <div class="settings-group">
-                    <label class="settings-label">VOLUME</label>
-                    <div class="volume-control">
-                        <input type="range" id="volumeSlider" min="0" max="10" value="4" class="volume-slider">
-                        <span class="volume-value" id="volumeValue">4/10</span>
+                    <div class="settings-group">
+                        <label class="settings-label">VOLUME</label>
+                        <div class="volume-control">
+                            <input type="range" id="volumeSlider" min="0" max="10" value="4" class="volume-slider">
+                            <span class="volume-value" id="volumeValue">4/10</span>
+                        </div>
                     </div>
-                </div>
 
-                <div class="settings-group">
-                    <label class="settings-label">GLOBAL OFFSET</label>
-                    <div class="volume-control">
-                        <input type="range" id="offsetSlider" min="-100" max="100" step="5" value="0" class="volume-slider">
-                        <span class="volume-value" id="offsetValue">0ms</span>
+                    <div class="settings-group">
+                        <label class="settings-label">GLOBAL OFFSET</label>
+                        <div class="volume-control">
+                            <input type="range" id="offsetSlider" min="-100" max="100" step="5" value="0" class="volume-slider">
+                            <span class="volume-value" id="offsetValue">0ms</span>
+                        </div>
+                        <div class="settings-hint">负数使音符更早到达判定线,正数反之</div>
+                        <div class="settings-hint touch-offset-hint" id="touchOffsetHint">触屏设备预置 +40ms 抵消触控/蓝牙音频延迟,可自由微调</div>
                     </div>
-                    <div class="settings-hint">负数使音符更早到达判定线,正数反之</div>
-                    <div class="settings-hint touch-offset-hint" id="touchOffsetHint">触屏设备预置 +40ms 抵消触控/蓝牙音频延迟,可自由微调</div>
-                </div>
 
-                <div class="settings-group" id="touchFeedbackGroup">
-                    <label class="settings-label">TOUCH FEEDBACK</label>
-                    <div class="toggle-control">
-                        <span class="toggle-desc">显示手指触控点圆环</span>
-                        <button class="toggle-switch" id="touchFeedbackToggle" type="button" role="switch" aria-checked="true" aria-label="触控点显示开关">
-                            <span class="toggle-knob"></span>
-                        </button>
+                    <div class="settings-group" id="touchFeedbackGroup">
+                        <label class="settings-label">TOUCH FEEDBACK</label>
+                        <div class="toggle-control">
+                            <span class="toggle-desc">显示手指触控点圆环</span>
+                            <button class="toggle-switch" id="touchFeedbackToggle" type="button" role="switch" aria-checked="true" aria-label="触控点显示开关">
+                                <span class="toggle-knob"></span>
+                            </button>
+                        </div>
+                        <div class="settings-hint">游戏内触按位置显示轨道颜色圆环与涟漪</div>
                     </div>
-                    <div class="settings-hint">游戏内触按位置显示轨道颜色圆环与涟漪</div>
                 </div>
 
                 <div class="settings-actions">

@@ -745,6 +745,14 @@ select:focus-visible {
     animation: fadeScale 0.3s ease;
 }
 
+/* 设置项容器：竖屏单列；横屏变成多列网格（见横屏媒体查询） */
+.settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-height: 0;
+}
+
 @keyframes fadeScale {
     from { opacity: 0; transform: scale(0.95); }
     to { opacity: 1; transform: scale(1); }
@@ -2967,44 +2975,62 @@ html.is-touch .mobile-btn::before {
     .song-card { padding: 8px; min-height: 40px; }
     .card-meta { display: none; }
 
-    /* ===== 设置面板：矮窗口改为双列紧凑网格，尽量不滚动 ===== */
-    .settings-card {
-        width: min(96vw, 640px);
-        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-        padding: 12px 16px;
-        gap: 8px 20px;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        align-content: start;
+    /* ===== 设置面板：三列网格 + 固定底部操作条（横屏不再需要滚动找按钮） ===== */
+    .settings-overlay {
+        padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px calc(env(safe-area-inset-bottom, 0px) + 8px);
     }
 
-    /* 标题与歌曲信息横跨双列 */
-    .settings-card .settings-header,
-    .settings-card .settings-song-info {
-        grid-column: 1 / -1;
+    .settings-card {
+        width: min(96vw, 940px);
+        max-width: none;
+        height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+        max-height: none;
+        padding: 10px 14px;
+        gap: 8px 14px;
+        display: grid;
+        grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+        overflow: hidden;
     }
+
+    .settings-card .settings-header { grid-row: 1; }
+    .settings-card .settings-song-info { grid-row: 2; }
+    .settings-card .audio-status { grid-row: 3; }
+    .settings-card .settings-body { grid-row: 4; }
+    .settings-card .settings-actions { grid-row: 5; }
 
     .settings-header h2 { font-size: 1rem; }
 
-    .settings-song-info { padding: 8px; }
-    .ssi-title { font-size: 0.8rem; }
+    .settings-song-info { padding: 6px 10px; }
+    .ssi-title { font-size: 0.82rem; }
+    .ssi-artist { font-size: 0.64rem; }
     .ssi-meta { font-size: 0.62rem; }
 
-    .settings-group { gap: 5px; margin: 0; }
-    .settings-label { font-size: 0.62rem; }
+    .settings-body {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px 14px;
+        align-content: start;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        min-height: 0;
+        padding-right: 2px;
+    }
+
+    .settings-group { gap: 4px; margin: 0; }
+    .settings-label { font-size: 0.6rem; }
 
     .diff-selector { grid-template-columns: repeat(2, 1fr); gap: 3px; }
-    .diff-btn { padding: 9px 2px; font-size: 0.62rem; }
+    .diff-btn { padding: 8px 2px; font-size: 0.6rem; min-height: 34px; }
 
     .style-selector { gap: 6px; }
-    .style-btn { padding: 10px 8px; gap: 6px; }
-    .style-preview { width: 36px; height: 16px; }
+    .style-btn,
+    .skin-btn { padding: 8px 6px; gap: 5px; font-size: 0.66rem; }
+    .style-preview { width: 34px; height: 14px; }
+    .skin-preview { width: 34px; height: 16px; }
 
-    .speed-control { gap: 10px; }
-    .speed-btn { width: 34px; height: 34px; font-size: 1rem; }
-    .speed-value { font-size: 0.95rem; min-width: 42px; }
+    .speed-control { gap: 8px; }
+    .speed-btn { width: 32px; height: 32px; font-size: 1rem; }
+    .speed-value { font-size: 0.9rem; min-width: 40px; }
 
     .volume-control { gap: 8px; }
     .volume-slider { height: 5px; }
@@ -3014,130 +3040,167 @@ html.is-touch .mobile-btn::before {
     .settings-hint { display: none; }   /* 矮窗口省略提示文字，保高度 */
 
     .toggle-control { gap: 8px; }
-    .toggle-desc { font-size: 0.72rem; }
-    .toggle-switch { width: 44px; height: 26px; }
-    .toggle-knob { width: 20px; height: 20px; }
-    .toggle-switch[aria-checked="true"] .toggle-knob { transform: translateX(18px); }
+    .toggle-desc { font-size: 0.7rem; }
+    .toggle-switch { width: 42px; height: 25px; }
+    .toggle-knob { width: 19px; height: 19px; }
+    .toggle-switch[aria-checked="true"] .toggle-knob { transform: translateX(17px); }
 
-    /* 操作按钮横跨双列，固定在底部 */
     .settings-actions {
-        grid-column: 1 / -1;
-        gap: 8px;
+        display: flex;
+        gap: 10px;
         margin-top: 2px;
     }
-    .settings-actions .btn { font-size: 0.75rem; padding: 10px 12px; }
+    .settings-actions .btn { flex: 1; font-size: 0.75rem; padding: 9px 12px; min-height: 40px; }
 
-    /* ===== 结算画面：矮窗口双列紧凑，不滚动 ===== */
+    /* ===== 结算画面：左右分栏（左侧等级/主要成绩，右侧判定与曲线） ===== */
     .result-overlay {
         padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px calc(env(safe-area-inset-bottom, 0px) + 8px);
         align-items: center;
     }
 
     .result-card {
-        max-width: min(96vw, 640px);
-        padding: 10px 16px;
-        gap: 8px;
+        width: min(96vw, 900px);
+        max-width: none;
+        height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
         max-height: 100%;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
+        padding: 12px 18px;
+        gap: 8px 20px;
+        display: grid;
+        grid-template-columns: minmax(180px, 0.85fr) minmax(0, 1.3fr);
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        align-items: start;
+        justify-items: center;
+        overflow: hidden;
     }
 
-    .result-status { padding: 6px 14px; gap: 8px; }
-    .status-icon { font-size: 1.1rem; }
-    .status-text { font-size: 0.8rem; }
-
-    .rank { font-size: 2.6rem; }
-    .rank-label { font-size: 0.7rem; }
-
-    .primary-stats { gap: 10px; }
-    .stat-big { padding: 10px 10px; }
-    .stat-big .stat-value { font-size: 1.1rem; }
-
-    .stats-grid { gap: 8px; }
-    .stat-box { padding: 7px 4px; }
-    .stat-label { font-size: 0.55rem; margin-bottom: 3px; }
-    .stat-value { font-size: 0.8rem; }
-
-    .chart-box { height: 60px; flex-shrink: 0; }
-
-    /* 矮窗口：按钮保持 40px 触控下限，但压缩行间距保证卡片不溢出 */
-    .result-actions { gap: 5px; }
-    .result-actions .btn { font-size: 0.72rem; padding: 5px 12px; min-height: 40px; }
-    .result-actions .result-actions-row { gap: 5px; }
-
-    /* 矮窗口：状态徽章与排名合并为一行，节省 50px 高度 */
     .result-card .result-status {
-        width: auto;
-        min-width: 40%;
-        padding: 7px 14px;
+        grid-column: 1;
+        grid-row: 1;
+        width: 100%;
+        padding: 7px 12px;
         gap: 8px;
         animation: none;
     }
+    .status-icon { font-size: 1.05rem; }
+    .status-text { font-size: 0.78rem; }
 
     .result-card .rank-display {
+        grid-column: 1;
+        grid-row: 2;
         flex-direction: row;
+        align-items: baseline;
         gap: 10px;
+        margin: 2px 0;
         animation: none;
     }
+    .result-card .rank { font-size: 2.8rem; line-height: 0.95; }
+    .rank-label { font-size: 0.72rem; }
 
-    .result-card .rank { line-height: 0.9; }
-
-    /* 主要成绩横向铺开 */
     .result-card .primary-stats {
+        grid-column: 1;
+        grid-row: 3;
+        width: 100%;
         gap: 8px;
+        align-self: start;
+        animation: none;
+    }
+    .result-card .stat-big { padding: 9px 8px; }
+    .result-card .stat-big .stat-value { font-size: 1.05rem; }
+    .result-card .stat-big .stat-label { font-size: 0.58rem; margin-bottom: 4px; }
+
+    .result-card .stats-grid {
+        grid-column: 2;
+        grid-row: 1;
+        width: 100%;
+        gap: 8px;
+        align-self: end;
+        animation: none;
+    }
+    .stat-box { padding: 7px 4px; }
+    .stat-label { font-size: 0.55rem; margin-bottom: 3px; }
+    .stat-value { font-size: 0.78rem; }
+
+    .result-card .chart-box {
+        grid-column: 2;
+        grid-row: 2 / span 2;
+        width: 100%;
+        height: 100%;
+        min-height: 88px;
         animation: none;
     }
 
-    .result-card .stat-big { padding: 8px 8px; }
-    .result-card .stat-big .stat-label { margin-bottom: 4px; font-size: 0.6rem; }
-
-    .result-card .stats-grid { animation: none; }
-
-    /* 矮窗口：四个操作按钮合并为两行（主按钮一行 + 次按钮一行） */
+    /* 四个按钮排成一行：RETRY / LEADERBOARD / EXPORT / HOME */
     .result-card .result-actions {
-        flex-direction: row;
-        flex-wrap: wrap;
+        grid-column: 1 / -1;
+        grid-row: 4;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+        margin-top: 2px;
         animation: none;
     }
-
-    .result-card .result-actions > .btn {
-        flex: 1 1 40%;
+    .result-card .result-actions .result-actions-row { display: contents; }
+    .result-card .result-actions .btn {
+        width: 100%;
+        font-size: 0.72rem;
+        padding: 8px 10px;
+        min-height: 40px;
+        letter-spacing: 0.5px;
     }
 
-    .result-card .result-actions .result-actions-row {
-        flex: 1 1 100%;
+    /* ===== 排行榜：占满高度，列表弹性滚动，底部按钮始终可见 ===== */
+    .lb-overlay {
+        padding: calc(env(safe-area-inset-top, 0px) + 6px) 10px calc(env(safe-area-inset-bottom, 0px) + 6px);
     }
 
-    /* ===== 排行榜：矮窗口全屏化 ===== */
     .lb-card {
-        max-width: min(100vw, 700px);
-        height: 100dvh;
-        max-height: 100dvh;
-        border-radius: 0;
+        width: min(100vw, 780px);
+        height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+        max-height: 100%;
+        max-width: min(96vw, 780px);
+        border-radius: 12px;
     }
 
-    .lb-list-wrapper { max-height: none; -webkit-overflow-scrolling: touch; }
-    .lb-record { padding: 8px 10px; min-height: 40px; }
+    .lb-header { padding: 10px 16px 8px; }
+    .lb-header h2 { font-size: 1rem; }
+    .lb-list-wrapper {
+        flex: 1;
+        min-height: 54px;
+        max-height: none;
+        padding: 0 16px 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+    .lb-record { padding: 7px 10px; min-height: 38px; }
+    .lb-card .btn { min-height: 38px; }
 
-    /* 横屏时触控键收窄放右下，性能面板移至左上 */
+    /* ===== 游玩：触控栏对齐轨道区，性能面板让开 HUD ===== */
     #mobileControls {
-        left: auto;
-        right: 0;
-        width: 46%;
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        width: calc(var(--playfield-width, 380px) + 12px);
+        max-width: 100%;
         padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)) 6px;
+        background: #0b0b12;
+        border-left: 1px solid rgba(255, 255, 255, 0.08);
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px 8px 0 0;
     }
 
-    .mobile-btns { height: 56px; gap: 4px; }
-    .mobile-btn { font-size: 1.1rem; min-height: 48px; }
+    .mobile-btns { height: 52px; gap: 4px; max-width: 100%; }
+    .mobile-btn { font-size: 1rem; min-height: 46px; }
 
+    /* 性能面板：挪到左上角 HUD 下方，避免压住分数 */
     #perfMonitor {
-        top: calc(env(safe-area-inset-top, 0px) + 4px);
+        top: calc(env(safe-area-inset-top, 0px) + 112px);
         bottom: auto;
-        left: 12px;
+        left: 8px;
         transform: none;
-        font-size: 0.55rem;
-        padding: 2px 8px;
-        gap: 6px;
+        font-size: 0.5rem;
+        padding: 2px 7px;
+        gap: 5px;
     }
 
     .game-pause-btn {
@@ -3145,6 +3208,13 @@ html.is-touch .mobile-btn::before {
         height: 40px;
         top: calc(env(safe-area-inset-top, 0px) + 8px);
         right: calc(env(safe-area-inset-right, 0px) + 8px);
+    }
+
+    /* 顶部 toast 在横屏下更贴近上沿，避免和 HUD 抢位置 */
+    .import-toast,
+    .notice-toast {
+        top: calc(env(safe-area-inset-top, 0px) + 8px);
+        font-size: 0.7rem;
     }
 }
 
@@ -3319,4 +3389,129 @@ html.is-pointer-fine body.game-active:not(.paused) {
     font-size: 0.68rem;
     color: var(--text-tertiary);
     word-break: break-all;
+}
+
+/* ============================================================
+   交互动效（横竖屏共用；尊重系统"减少动态效果"）
+   ============================================================ */
+@keyframes screenIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.995); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes toastDrop {
+    from { opacity: 0; transform: translate(-50%, -8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes bootGlow {
+    0%, 100% { text-shadow: 0 0 0 rgba(77, 171, 247, 0); }
+    50% { text-shadow: 0 0 20px rgba(77, 171, 247, 0.35); }
+}
+
+/* 进入画面时给主容器一个轻微上浮，由 JS 添加 .enter-anim 触发 */
+.enter-anim {
+    animation: screenIn 0.3s cubic-bezier(0.22, 0.8, 0.2, 1) both;
+}
+
+.start-layout .logo-block {
+    animation: screenIn 0.34s cubic-bezier(0.22, 0.8, 0.2, 1) both;
+}
+
+.boot-logo {
+    animation: bootGlow 2.6s ease-in-out infinite;
+}
+
+.import-toast,
+.notice-toast {
+    animation: toastDrop 0.2s ease;
+}
+
+/* 歌曲卡片：按下有轻微回弹，选中/悬停用边框+底色过渡 */
+.song-card {
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.song-card:active {
+    transform: scale(0.985);
+}
+
+.song-card.selected {
+    box-shadow: 0 0 0 1px rgba(77, 171, 247, 0.35), 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.diff-btn,
+.style-btn,
+.skin-btn,
+.speed-btn,
+.toggle-switch,
+.lb-sort-btn {
+    transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.diff-btn:active,
+.style-btn:active,
+.skin-btn:active,
+.speed-btn:active,
+.lb-sort-btn:active {
+    transform: scale(0.96);
+}
+
+.stat-big,
+.stat-box {
+    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.pause-card,
+.settings-card,
+.lb-card,
+.result-card {
+    will-change: transform, opacity;
+}
+
+/* 结果页等级：入场轻微放大 */
+.result-card.result-enter .rank {
+    animation: rankPop 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.2) both;
+}
+
+@keyframes rankPop {
+    from { opacity: 0; transform: scale(0.72); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ============================================================
+   横屏安全区（刘海 / 挖孔屏）：左右内容避让，文字不贴边
+   ============================================================ */
+@media (orientation: landscape) and (max-height: 520px) {
+    #startScreen {
+        padding-left: env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
+    }
+
+    .settings-overlay,
+    .result-overlay {
+        padding-left: calc(env(safe-area-inset-left, 0px) + 12px);
+        padding-right: calc(env(safe-area-inset-right, 0px) + 12px);
+    }
+
+    .lb-overlay {
+        padding-left: calc(env(safe-area-inset-left, 0px) + 10px);
+        padding-right: calc(env(safe-area-inset-right, 0px) + 10px);
+    }
+
+    .import-toast,
+    .notice-toast {
+        max-width: min(88vw, 420px);
+    }
 }
