@@ -98,6 +98,7 @@ function gameLoop(timestamp) {
         renderer.drawNotes(gameState.pauseSnapshotTime);
         renderer.drawParticles();
         renderer.drawJudgments();
+        renderer.drawTouchPoints();
         renderer.drawHUD();
         renderer.drawPauseOverlay();
         perfMonitor.endFrame();
@@ -153,6 +154,7 @@ function gameLoop(timestamp) {
     renderer.drawNotes(currentTime);
     renderer.drawParticles();
     renderer.drawJudgments();
+    renderer.drawTouchPoints();
     renderer.drawHUD();
     renderer.drawSkipIntroHint();
 

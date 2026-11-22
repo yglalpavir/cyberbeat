@@ -8,7 +8,8 @@ const DEFAULT_SETTINGS = {
     volume: 4,
     noteStyle: 'orb',
     difficulty: 'normal+',
-    audioOffset: 0
+    audioOffset: 0,
+    touchFeedback: true
 };
 
 class SettingsStore {
@@ -85,6 +86,9 @@ class SettingsStore {
         if (s.audioOffset !== undefined && typeof audioOffsetMs !== 'undefined') {
             audioOffsetMs = s.audioOffset;
         }
+        if (s.touchFeedback !== undefined && typeof touchFeedbackEnabled !== 'undefined') {
+            touchFeedbackEnabled = !!s.touchFeedback;
+        }
     }
 
     /**
@@ -97,7 +101,8 @@ class SettingsStore {
             volume: currentVolume,
             noteStyle: noteStyle,
             difficulty: selectedDifficulty,
-            audioOffset: typeof audioOffsetMs !== 'undefined' ? audioOffsetMs : 0
+            audioOffset: typeof audioOffsetMs !== 'undefined' ? audioOffsetMs : 0,
+            touchFeedback: typeof touchFeedbackEnabled !== 'undefined' ? touchFeedbackEnabled : true
         });
     }
 }

@@ -262,6 +262,18 @@ class UIManager {
             });
         }
 
+        // 触控点显示开关（仅触屏设备显示该分组）
+        this.touchFeedbackToggle = document.getElementById('touchFeedbackToggle');
+        this.touchFeedbackGroup = document.getElementById('touchFeedbackGroup');
+        if (this.touchFeedbackToggle) {
+            this.touchFeedbackToggle.addEventListener('click', () => {
+                touchFeedbackEnabled = !touchFeedbackEnabled;
+                this._updateTouchFeedbackToggle();
+                this._syncSettingsToStore();
+            });
+            this._updateTouchFeedbackToggle();
+        }
+
         // 游戏内触控 UI
         if (this.gamePauseBtn) {
             this.gamePauseBtn.addEventListener('click', () => this.togglePause());
@@ -1729,12 +1741,25 @@ class UIManager {
             if (this.offsetSlider) this.offsetSlider.value = audioOffsetMs;
             if (this.offsetValue) this.offsetValue.textContent = (audioOffsetMs > 0 ? '+' : '') + audioOffsetMs + 'ms';
         }
+
+        // 应用触控点显示开关
+        if (s.touchFeedback !== undefined && typeof touchFeedbackEnabled !== 'undefined') {
+            touchFeedbackEnabled = !!s.touchFeedback;
+            this._updateTouchFeedbackToggle();
+        }
     }
 
     // ========== 设置变更时同步持久化 ==========
     _syncSettingsToStore() {
         if (typeof settingsStore !== 'undefined') {
             settingsStore.syncFromRuntime();
+        }
+    }
+
+    /** 同步触控点开关 UI 状态 */
+    _updateTouchFeedbackToggle() {
+        if (this.touchFeedbackToggle) {
+            this.touchFeedbackToggle.setAttribute('aria-checked', touchFeedbackEnabled ? 'true' : 'false');
         }
     }
 
@@ -2021,6 +2046,10 @@ class UIManager {
                 if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
                 try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+                // 触控点显示（触屏来源才显示，鼠标点击不画圆环）
+                if (e.pointerType === 'touch' && renderer) {
+                    renderer.addTouchPoint(e.pointerId, e.clientX, e.clientY, index);
+                }
                 if (gameState.pressedKeys.has(key)) return;
                 btn.classList.add('active');
                 gameState.pressedKeys.add(key);
@@ -2028,7 +2057,8 @@ class UIManager {
             };
 
             const release = (e) => {
-                if (e) e.preventDefault();
+                if (renderer) renderer.removeTouchPoint(e ? e.pointerId : null);
+                if (e && e.preventDefault) e.preventDefault();
                 btn.classList.remove('active');
                 if (gameState.screen === 'game' && !gameState.paused && gameState.pressedKeys.has(key)) {
                     this.checkHoldRelease(index);
@@ -2075,7 +2105,18 @@ class UIManager {
                 if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
                 for (const touch of e.changedTouches) {
-                    this._handleCanvasTouch(touch.clientX, touch.clientY, true);
+                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, true);
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if (gameState.screen !== 'game' || gameState.paused) return;
+                e.preventDefault();
+                for (const touch of e.changedTouches) {
+                    // 触控点跟随手指移动（滑动换轨）
+                    if (renderer && touchFeedbackEnabled) {
+                        renderer.moveTouchPoint(touch.identifier, touch.clientX, touch.clientY);
+                    }
                 }
             }, { passive: false });
 
@@ -2083,21 +2124,24 @@ class UIManager {
                 if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
                 for (const touch of e.changedTouches) {
-                    this._handleCanvasTouch(touch.clientX, touch.clientY, false);
+                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, false);
                 }
             }, { passive: false });
 
             canvas.addEventListener('touchcancel', (e) => {
                 if (gameState.screen !== 'game' || gameState.paused) return;
                 for (const touch of e.changedTouches) {
-                    this._handleCanvasTouch(touch.clientX, touch.clientY, false);
+                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, false);
                 }
             });
         }
     }
 
-    /** 处理 Canvas 上的触控，映射到轨道（全屏均分映射，边缘外扩容错） */
-    _handleCanvasTouch(clientX, clientY, isDown) {
+    /**
+     * 处理 Canvas 上的触控，映射到轨道（全屏均分映射，边缘外扩容错）
+     * @param {number} touchId - touch.identifier，用于区分多根手指
+     */
+    _handleCanvasTouch(touchId, clientX, clientY, isDown) {
         if (!renderer) return;
 
         // 触点落在底部触控键区域（约底部 100px）→ 忽略，避免与 DOM 按钮重复触发
@@ -2111,6 +2155,15 @@ class UIManager {
         );
 
         const key = KEYS[trackIndex];
+
+        // 触控点显示
+        if (touchFeedbackEnabled) {
+            if (isDown) {
+                renderer.addTouchPoint('c' + touchId, clientX, clientY, trackIndex);
+            } else {
+                renderer.removeTouchPoint('c' + touchId);
+            }
+        }
 
         if (isDown && !gameState.pressedKeys.has(key)) {
             gameState.pressedKeys.add(key);

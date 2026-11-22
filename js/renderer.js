@@ -38,6 +38,10 @@ class Renderer {
         this._laserPool = [];
         this._laserPoolIdx = 0;
         this._LASER_POOL_MAX = 64;
+        // 触控点显示（移动端）：按住中的圆环 + 松开后的涟漪
+        // touch 对象: {x, y, track, phase: 'down'|'ripple', age}
+        this._touchPoints = new Map();   // key: pointerId/touch identifier
+        this._touchRipples = [];         // 松开后的扩散涟漪（短生命周期）
 
         this.resize();
     }
@@ -832,6 +836,93 @@ class Renderer {
         for (let i = 0; i < this._particlePool.length; i++) this._particlePool[i].active = false;
         for (let i = 0; i < this._laserPool.length; i++) this._laserPool[i].active = false;
         for (let i = 0; i < this._judgmentPool.length; i++) this._judgmentPool[i].active = false;
+        // 清空触控点（重试/回主页时）
+        this._touchPoints.clear();
+        this._touchRipples.length = 0;
+    }
+
+    // ========== 触控点显示 (移动端) ==========
+
+    /** 手指按下：显示对应轨道颜色的圆环 */
+    addTouchPoint(id, x, y, track) {
+        if (!touchFeedbackEnabled) return;
+        this._touchPoints.set(id, { x, y, track, phase: 'down', age: 0 });
+    }
+
+    /** 手指移动：更新触控点位置（滑动切换轨道时跟随） */
+    moveTouchPoint(id, x, y) {
+        const p = this._touchPoints.get(id);
+        if (p) { p.x = x; p.y = y; }
+    }
+
+    /** 手指松开：圆环消失，留下扩散涟漪 */
+    removeTouchPoint(id) {
+        const p = this._touchPoints.get(id);
+        if (p) {
+            if (touchFeedbackEnabled) {
+                this._touchRipples.push({ x: p.x, y: p.y, track: p.track, age: 0 });
+                if (this._touchRipples.length > 12) this._touchRipples.shift();
+            }
+            this._touchPoints.delete(id);
+        }
+    }
+
+    /** 绘制触控点与涟漪（gameLoop 每帧调用） */
+    drawTouchPoints() {
+        if (!touchFeedbackEnabled) return;
+        if (this._touchPoints.size === 0 && this._touchRipples.length === 0) return;
+
+        const ctx = this.ctx;
+        const dt = this._dt;
+        const scale = dt / 16.67;
+
+        // 按住中：实心半透明圆 + 描边圆环，呼吸微动
+        for (const p of this._touchPoints.values()) {
+            p.age += dt;
+            const color = TRACK_COLORS[p.track] || '#ffffff';
+            const breath = 1 + Math.sin(p.age / 180) * 0.06;
+            const r = 26 * breath;
+
+            ctx.globalAlpha = 0.18;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.globalAlpha = 0.85;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // 中心小圆点
+            ctx.globalAlpha = 0.5;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 松开涟漪：扩散 + 淡出
+        let valid = 0;
+        for (let i = 0; i < this._touchRipples.length; i++) {
+            const rp = this._touchRipples[i];
+            rp.age += dt;
+            const t = rp.age / 350;              // 0 → 1
+            if (t >= 1) continue;                // 结束，不保留
+            const color = TRACK_COLORS[rp.track] || '#ffffff';
+            const r = 20 + t * 44;
+            ctx.globalAlpha = 0.55 * (1 - t);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5 * (1 - t) + 0.5;
+            ctx.beginPath();
+            ctx.arc(rp.x, rp.y, r, 0, Math.PI * 2);
+            ctx.stroke();
+            this._touchRipples[valid++] = rp;
+        }
+        this._touchRipples.length = valid;
+        ctx.globalAlpha = 1.0;
     }
 }
 
