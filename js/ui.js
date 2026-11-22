@@ -216,6 +216,13 @@ class UIManager {
         this.tabMidi.addEventListener('click', () => this.switchTab('midi'));
         this.tabSongs.addEventListener('click', () => this.switchTab('songs'));
 
+        // 移动端选曲增强（仅触屏设备）：
+        // 1. 双击歌曲卡片 → 直接进入设置页（省一次 START 点按）
+        // 2. 滚动惯性中抑制卡片 click（防止滑动列表时误选歌）
+        if (IS_TOUCH_DEVICE) {
+            this._setupTouchSongListEnhancements();
+        }
+
         // 导入 MIDI 卡片点击 → 触发 file input
         this.importMidiCard.addEventListener('click', (e) => {
             if (e.target !== this.midiUpload) {
@@ -640,6 +647,64 @@ class UIManager {
 
         card.addEventListener('click', () => this.selectLibrarySong(song, index));
         return card;
+    }
+
+    // ========== 移动端选曲增强 ==========
+    /**
+     * 触屏设备选曲列表增强：
+     * 1. 双击歌曲卡片 → 直接进入设置页（选中 + handleStartOrConfig 一步到位）
+     * 2. 滚动惯性中抑制卡片 click——手指位移超过 10px 视为滑动而非点选，
+     *    防止滑动列表浏览时误选歌曲
+     */
+    _setupTouchSongListEnhancements() {
+        const listWrapper = document.getElementById('songListWrapper');
+        if (!listWrapper) return;
+
+        // 双击检测（选卡后 400ms 内再点同一张卡 = 双击）
+        this._lastCardTapAt = 0;
+        this._lastCardTapIndex = -1;
+
+        // 滑动抑制：capture 阶段监听，位移超阈值则拦截本次 click
+        let touchStartX = 0, touchStartY = 0, touchMoved = false;
+        listWrapper.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            touchMoved = false;
+        }, { passive: true });
+        listWrapper.addEventListener('touchmove', (e) => {
+            const dx = Math.abs(e.touches[0].clientX - touchStartX);
+            const dy = Math.abs(e.touches[0].clientY - touchStartY);
+            if (dx > 10 || dy > 10) touchMoved = true;
+        }, { passive: true });
+        listWrapper.addEventListener('click', (e) => {
+            if (touchMoved) {
+                e.stopPropagation();
+                e.preventDefault();
+                touchMoved = false;
+            }
+        }, true);
+
+        // 双击进设置：在列表容器上代理双击（卡片是动态生成的）
+        listWrapper.addEventListener('click', (e) => {
+            const card = e.target.closest('.song-card');
+            if (!card || card.classList.contains('import-card')) return;   // 导入卡片不参与双击
+            const idx = card.dataset.songIndex;
+            if (idx === undefined) return;
+
+            const now = performance.now();
+            const isDoubleTap = this._lastCardTapIndex === idx && (now - this._lastCardTapAt) <= 400;
+            this._lastCardTapAt = now;
+            this._lastCardTapIndex = idx;
+
+            if (isDoubleTap) {
+                this._lastCardTapIndex = -1;
+                // 已选中则直接进入设置；未选中先选中再进入
+                if (selectedSongSource !== 'library' || selectedLibrarySong !== songLibrary[parseInt(idx)]) {
+                    this.selectLibrarySong(songLibrary[parseInt(idx)], parseInt(idx));
+                }
+                this.handleStartOrConfig();
+            }
+        });
     }
 
     /**
