@@ -709,6 +709,7 @@ class UIManager {
 
             if (isDoubleTap) {
                 this._lastCardTapIndex = -1;
+                this._stopPreview();   // 双击进设置前停止试听
                 // 已选中则直接进入设置；未选中先选中再进入
                 if (selectedSongSource !== 'library' || selectedLibrarySong !== songLibrary[parseInt(idx)]) {
                     this.selectLibrarySong(songLibrary[parseInt(idx)], parseInt(idx));
@@ -716,6 +717,69 @@ class UIManager {
                 this.handleStartOrConfig();
             }
         });
+
+        // 长按试听：按住已选中的歌曲卡片 600ms → 播放该曲伴奏预览，
+        // 松手/滑动/切页即停。MC 歌曲用 mc_audio 伴奏，MIDI 无音频跳过。
+        this._previewTimer = null;
+        listWrapper.addEventListener('touchstart', (e) => {
+            const card = e.target.closest('.song-card');
+            if (!card || card.classList.contains('import-card')) return;
+            const idx = card.dataset.songIndex;
+            if (idx === undefined) return;
+            const song = songLibrary[parseInt(idx)];
+            if (!song || !this._isChartSong(song)) return;   // MIDI 无独立音频文件
+
+            // 仅已选中的歌曲触发（避免与单击选中/双击进设置时序冲突）
+            if (selectedLibrarySong !== song) return;
+
+            this._clearPreviewTimer();
+            this._previewTimer = setTimeout(() => {
+                this._previewTimer = null;
+                this._startPreview(song);
+            }, 600);
+        }, { passive: true });
+        const cancelPreview = () => this._clearPreviewTimer();
+        listWrapper.addEventListener('touchmove', cancelPreview, { passive: true });
+        listWrapper.addEventListener('touchend', cancelPreview, { passive: true });
+        listWrapper.addEventListener('touchcancel', cancelPreview, { passive: true });
+    }
+
+    // ========== 歌曲试听（长按预览） ==========
+    _clearPreviewTimer() {
+        if (this._previewTimer) {
+            clearTimeout(this._previewTimer);
+            this._previewTimer = null;
+        }
+    }
+
+    /** 开始试听：加载（走缓存）并循环播放该曲伴奏 */
+    async _startPreview(song) {
+        if (!this._isChartSong(song) || !song.audio) return;
+        const cacheKey = this._songAudioCacheKey(song);
+        this._showImportToast(`试听 ${song.title}…`);
+        const ok = await audioEngine.loadAudioFile(this._songAudioUrl(song), { cacheKey, setCurrent: false });
+        this._hideImportToast();
+        if (!ok) return;
+
+        // 用户已切换选择/离开选曲页 → 放弃播放
+        if (selectedLibrarySong !== song || gameState.screen !== 'start') return;
+
+        // 停掉现有播放（含结算音乐残留），从缓存取解码结果循环播放
+        audioEngine.stopMusic();
+        audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+        audioEngine.startAudioPlayback(0);
+        this._previewLoop = true;
+        audioEngine.audioSource.loop = true;
+        this._previewingSong = song;
+    }
+
+    /** 停止试听 */
+    _stopPreview() {
+        this._clearPreviewTimer();
+        if (this._previewingSong) {
+            audioEngine.stopMusic();
+            this._previewingSong = null;
+        }
     }
 
     /**
@@ -782,6 +846,8 @@ class UIManager {
 
     // ========== 选曲逻辑 ==========
     selectLibrarySong(song, index) {
+        // 切歌时停止试听
+        this._stopPreview();
         selectedSongSource = 'library';
         selectedLibrarySong = song;
         loadedMidiData = null;
@@ -1315,6 +1381,7 @@ class UIManager {
     // ========== 启动流程 ==========
     async handleStartOrConfig() {
         if (!selectedSongSource) return;
+        this._stopPreview();   // 离开选曲页前停止歌曲试听
 
         if (selectedSongSource === 'library' && selectedLibrarySong) {
             // 谱面（.mc / .osu，几十 KB）与 MIDI（.mid，几十 KB）都很小，
@@ -1723,6 +1790,8 @@ class UIManager {
     }
 
     async _startGameInner() {
+        // 开始游戏前停止歌曲试听，防止预览音乐混入游戏伴奏
+        this._stopPreview();
 
         const chartData = getLoadedChartData();
         const isChartMode = !!chartData;
@@ -2056,7 +2125,8 @@ class UIManager {
     }
 
     goToHome() {
-        // 停止所有音频
+        // 停止所有音频（含歌曲试听）
+        this._stopPreview();
         audioEngine.stopMusic();
         // 退出游戏态 UI
         document.body.classList.remove('game-active');
@@ -2067,9 +2137,11 @@ class UIManager {
         gameState.reset();
         // 重置渲染器对象池
         if (renderer) renderer.resetPools();
-        // 隐藏结果和排行榜画面
+        // 隐藏所有覆盖画面（结果/排行榜/设置/osz 选择器）
         this.resultScreen.classList.add('hidden');
         if (this.leaderboardScreen) this.leaderboardScreen.classList.add('hidden');
+        this.settingsScreen.classList.add('hidden');
+        if (this.oszPicker) this.oszPicker.classList.add('hidden');
         // 显示开始画面（静态背景，绘制一帧即可）
         this.startScreen.classList.remove('hidden');
         repaintStartScreen();
