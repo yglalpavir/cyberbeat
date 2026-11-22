@@ -14,6 +14,10 @@ class AudioEngine {
         this.audioBuffer = null;
         this.audioSource = null;
         this.audioStartTime = 0;
+        this._currentAudioUrl = null;
+        // 解码结果缓存（仅缓存游戏曲目，RETRY / 重选时跳过下载与解码）
+        this._bufferCache = new Map();
+        this._BUFFER_CACHE_MAX = 1;
         // 暂停支持
         this._paused = false;
         this._mode = null;          // 'midi' | 'preset' | 'file'
@@ -261,23 +265,63 @@ class AudioEngine {
 
     /**
      * 加载音频文件（.ogg / .mp3 / .wav）
-     * @param {string} url - 音频文件路径
+     * 支持两种调用形态：
+     *   - loadAudioFile(url)                 兼容旧调用，直接设置为当前曲目
+     *   - loadAudioFile(url, { cacheKey })   带 key 走解码缓存
+     * @param {string} url - 音频文件路径或 blob URL
+     * @param {Object} [opts]
+     * @param {string} [opts.cacheKey] - 缓存键（如曲目 id）；命中时跳过下载与解码
+     * @param {boolean} [opts.setCurrent=true] - 是否把结果设为当前待播曲目
      * @returns {Promise<boolean>} 是否加载成功
      */
-    async loadAudioFile(url) {
+    async loadAudioFile(url, opts = {}) {
+        const { cacheKey = null, setCurrent = true } = opts;
         this.init();
+
+        // 缓存命中：跳过 fetch + decodeAudioData（移动端解码 3MB ogg 可达数秒）
+        if (cacheKey && this._bufferCache.has(cacheKey)) {
+            const cached = this._bufferCache.get(cacheKey);
+            if (setCurrent) {
+                this.audioBuffer = cached;
+                this._currentAudioUrl = url;
+            }
+            return true;
+        }
+
         try {
             const response = await fetch(url);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const arrayBuffer = await response.arrayBuffer();
-            this.audioBuffer = await this.context.decodeAudioData(arrayBuffer);
-            console.log('Audio file loaded:', url, `duration: ${this.audioBuffer.duration.toFixed(1)}s`);
+            const buffer = await this.context.decodeAudioData(arrayBuffer);
+
+            if (cacheKey) this._cacheBuffer(cacheKey, buffer);
+            if (setCurrent) {
+                this.audioBuffer = buffer;
+                this._currentAudioUrl = url;
+            }
+            console.log('Audio file loaded:', url, `duration: ${buffer.duration.toFixed(1)}s`);
             return true;
         } catch (err) {
             console.error('Failed to load audio file:', url, err);
-            this.audioBuffer = null;
+            if (setCurrent) this.audioBuffer = null;
             return false;
         }
+    }
+
+    /** 写入解码缓存（保留最近 1 首，避免内存膨胀） */
+    _cacheBuffer(key, buffer) {
+        this._bufferCache.clear();
+        this._bufferCache.set(key, buffer);
+    }
+
+    /** 查询某曲目是否已缓存解码结果 */
+    hasCachedAudio(cacheKey) {
+        return this._bufferCache.has(cacheKey);
+    }
+
+    /** 从缓存取解码结果（不改变当前曲目） */
+    getCachedAudio(cacheKey) {
+        return this._bufferCache.get(cacheKey) || null;
     }
 
     /**
@@ -325,9 +369,10 @@ class AudioEngine {
     stopAudio() {
         if (this.audioSource) {
             try { this.audioSource.stop(); } catch (e) { /* 可能已停止 */ }
-            this.audioSource.disconnect();
+            try { this.audioSource.disconnect(); } catch (e) { /* ignore */ }
             this.audioSource = null;
         }
+        // 只解除"当前待播"引用；解码缓存保留，RETRY 时免重复下载解码
         this.audioBuffer = null;
     }
 

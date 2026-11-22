@@ -652,6 +652,12 @@ class UIManager {
         importedMcFileName = null;
         selectedSongDisplayName = song.title;
 
+        // 切歌：清掉上一首的待播音频引用与预加载状态，
+        // 防止尚未完成的旧预加载把旧伴奏写进新歌的播放
+        audioEngine.audioBuffer = null;
+        this._pendingAudioReady = null;
+        this._pendingAudioKey = null;
+
         this.updateSelectionDisplay();
         this.updateAllHighlights();
         this.updateStartButtons();
@@ -1066,6 +1072,11 @@ class UIManager {
         importedMcFileName = null;
         selectedSongDisplayName = null;
 
+        // 同步清空待播音频引用与预加载状态
+        audioEngine.audioBuffer = null;
+        this._pendingAudioReady = null;
+        this._pendingAudioKey = null;
+
         this.updateSelectionDisplay();
         this.updateAllHighlights();
         this.updateStartButtons();
@@ -1117,44 +1128,135 @@ class UIManager {
     async handleStartOrConfig() {
         if (!selectedSongSource) return;
 
-        // 如果选中的是曲库歌曲，需要先加载谱面和音频
         if (selectedSongSource === 'library' && selectedLibrarySong) {
-            // 先加载谱面（.mc 或 .osu，如果有）
+            // 谱面（.mc / .osu，几十 KB）与 MIDI（.mid，几十 KB）都很小，
+            // 同步加载以保证设置页元数据完整 / MIDI 谱面生成可用
             if (selectedLibrarySong.beatmapType === 'mc') {
                 const mcLoaded = await this.loadLibraryMcBeatmap();
                 if (!mcLoaded) return;
             } else if (selectedLibrarySong.beatmapType === 'osu') {
                 const osuLoaded = await this.loadLibraryOsuBeatmap();
                 if (!osuLoaded) return;
-            }
-
-            // 加载音频：谱面歌曲（mc/osu）使用 audio 字段 + 对应目录，MIDI 使用 file 字段 + songs 路径
-            const song = selectedLibrarySong;
-            const isChart = this._isChartSong(song);
-            const audioFile = isChart ? song.audio : song.file;
-
-            if (audioFile) {
-                let basePath;
-                if (song.beatmapType === 'osu') {
-                    basePath = CONFIG.osuBasePath + (song.folder ? song.folder + '/' : '');
-                } else if (song.beatmapType === 'mc') {
-                    basePath = CONFIG.mcAudioBasePath;
-                } else {
-                    basePath = CONFIG.songBasePath;
-                }
-                const loaded = await this.loadAudioForSong(audioFile, basePath, song);
-                if (!loaded && !isChart) return;  // MIDI 必须加载成功
-                // 谱面歌曲允许音频加载失败（回退到预设音乐）
+            } else if (!loadedMidiData) {
+                const midiLoaded = await this.loadLibraryMidi();
+                if (!midiLoaded) return;   // MIDI 必须加载成功（谱面由它生成）
             }
         }
 
-        // 谱面/导入模式允许没有 MIDI（使用预设音乐），但至少要有谱面数据
         if (!loadedMidiData && !getLoadedChartData()) {
             alert('No beatmap data available. Please select a song or import a MIDI file.');
             return;
         }
 
+        // 立即显示设置页——几 MB 的伴奏音频改为后台预加载，
+        // 避免移动端下载 + decodeAudioData 数秒的空白等待
         this.showSettings();
+
+        if (selectedSongSource === 'library' && selectedLibrarySong) {
+            this._preloadSongAudio(selectedLibrarySong);
+        }
+    }
+
+    /** 获取歌曲音频的缓存键（曲目 id 优先，回退文件路径） */
+    _songAudioCacheKey(song) {
+        const audioFile = this._isChartSong(song) ? song.audio : song.file;
+        return song.id != null ? `song:${song.id}` : `path:${audioFile}`;
+    }
+
+    /** 获取歌曲音频的完整 URL */
+    _songAudioUrl(song) {
+        const audioFile = this._isChartSong(song) ? song.audio : song.file;
+        if (!audioFile) return null;
+
+        let basePath;
+        if (song.beatmapType === 'osu') {
+            basePath = CONFIG.osuBasePath + (song.folder ? song.folder + '/' : '');
+        } else if (song.beatmapType === 'mc') {
+            basePath = CONFIG.mcAudioBasePath;
+        } else {
+            basePath = CONFIG.songBasePath;
+        }
+        return basePath + audioFile;
+    }
+
+    /**
+     * 后台预加载当前选中歌曲的伴奏音频。
+     * - MIDI 歌曲（.mid 很小）仍在 START GAME 前同步加载（谱面生成依赖它）
+     * - 谱面歌曲（.mc / .osu 的 ogg/mp3 伴奏）异步下载解码并写入缓存，
+     *   START GAME 时从缓存取用；失败则游戏内回退预设音乐
+     */
+    _preloadSongAudio(song) {
+        const cacheKey = this._songAudioCacheKey(song);
+        this._pendingAudioKey = cacheKey;
+
+        // MIDI：文件小且 startGame 的谱面生成强依赖 loadedMidiData，保持同步加载语义
+        if (!this._isChartSong(song)) {
+            if (loadedMidiData) return;   // 已加载过
+            const url = this._songAudioUrl(song);
+            if (!url) return;
+            this.loadAudioForSong(song.file, CONFIG.songBasePath, song).catch(err => {
+                console.warn('MIDI preload failed:', err);
+            });
+            return;
+        }
+
+        // 谱面歌曲：已缓存 → 直接恢复为当前待播曲目，无需网络
+        if (audioEngine.hasCachedAudio(cacheKey)) {
+            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+            this._pendingAudioReady = true;
+            return;
+        }
+
+        const url = this._songAudioUrl(song);
+        if (!url) return;
+
+        this._pendingAudioReady = false;
+        audioEngine.loadAudioFile(url, { cacheKey, setCurrent: false }).then(success => {
+            if (this._pendingAudioKey === cacheKey) {
+                this._pendingAudioReady = success;
+                if (success) {
+                    audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+                }
+            }
+        }).catch(() => {
+            if (this._pendingAudioKey === cacheKey) this._pendingAudioReady = false;
+        });
+    }
+
+    /**
+     * 等待后台预加载完成（谱面歌曲伴奏），带 8 秒超时。
+     * MIDI 歌曲在预加载里同步处理，通常瞬间完成。
+     * @returns {Promise<boolean>} 音频是否就绪（false = 超时/失败，游戏将回退预设音乐）
+     */
+    async _waitForSongAudio(song) {
+        const cacheKey = this._songAudioCacheKey(song);
+
+        // MIDI：同步加载（若尚未完成）
+        if (!this._isChartSong(song)) {
+            if (!loadedMidiData && song.file) {
+                await this.loadAudioForSong(song.file, CONFIG.songBasePath, song);
+            }
+            return !!loadedMidiData;
+        }
+
+        // 已缓存：直接恢复
+        if (audioEngine.hasCachedAudio(cacheKey)) {
+            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+            return true;
+        }
+
+        // 等预加载完成（最多 8s，超时回退预设音乐）
+        const deadline = performance.now() + 8000;
+        while (performance.now() < deadline) {
+            if (audioEngine.hasCachedAudio(cacheKey)) {
+                audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+                return true;
+            }
+            if (this._pendingAudioKey !== cacheKey) break;   // 已切歌
+            if (this._pendingAudioReady === false && audioEngine.audioBuffer) break;
+            await new Promise(r => setTimeout(r, 100));
+        }
+        return audioEngine.hasCachedAudio(cacheKey);
     }
 
     /**
@@ -1205,9 +1307,7 @@ class UIManager {
             alert(`Failed to load: ${song.title}\nPlease check that the MIDI file exists at:\n${filePath}`);
             return false;
         }
-    }
-
-    // 保留旧方法名以兼容导入 MIDI 等其他调用处
+    }    // 保留旧方法名以兼容导入 MIDI 等其他调用处
     async loadLibraryMidi() {
         const song = selectedLibrarySong;
         return this.loadAudioForSong(song.file, CONFIG.songBasePath, song);
@@ -1419,7 +1519,7 @@ class UIManager {
     }
 
     // ========== 游戏开始 ==========
-    startGame() {
+    async startGame() {
         if (!selectedSongSource) {
             alert('Please select a song first.');
             return;
@@ -1431,6 +1531,27 @@ class UIManager {
         if (!loadedMidiData && !isChartMode) {
             alert('No beatmap data loaded. Please select a song or import a beatmap first.');
             return;
+        }
+
+        // 曲库歌曲：确保伴奏音频就绪（通常预加载已完成，此处最多短暂等待）。
+        // 等待期间按钮显示 LOADING；超时/失败回退预设音乐，不阻塞开始。
+        if (selectedSongSource === 'library' && selectedLibrarySong) {
+            const btn = this.settingsStartBtn;
+            const originalText = btn ? btn.textContent : null;
+            const showLoading = (on) => {
+                if (btn && originalText !== null) {
+                    btn.textContent = on ? 'LOADING…' : originalText;
+                    btn.disabled = on;
+                }
+            };
+            const song = selectedLibrarySong;
+            // MIDI 歌曲的谱面生成强依赖 loadedMidiData；预加载可能还在进行
+            if (!this._isChartSong(song) && !loadedMidiData) showLoading(true);
+            const audioReady = await this._waitForSongAudio(song);
+            if (!audioReady && this._isChartSong(song)) {
+                console.warn('Song audio not ready, falling back to preset music.');
+            }
+            showLoading(false);
         }
 
         // 停止一切残留播放（结算音乐/上一局音乐），并清掉可能挂起的启动定时器
@@ -1479,6 +1600,15 @@ class UIManager {
 
         // 重置渲染器对象池
         if (renderer) renderer.resetPools();
+
+        // 重试/重开前：确保解码缓存中的伴奏恢复为当前待播曲目
+        // （stopMusic 只解除 audioBuffer 引用，缓存里还有解码结果，无需重新下载）
+        if (selectedSongSource === 'library' && selectedLibrarySong && this._isChartSong(selectedLibrarySong)) {
+            const cacheKey = this._songAudioCacheKey(selectedLibrarySong);
+            if (audioEngine.hasCachedAudio(cacheKey)) {
+                audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+            }
+        }
 
         // 设置未来时间实现倒计时（谱面时间从倒计时结束时开始计算）
         // 全局偏移：正值使音符更晚到达判定线，负值反之
