@@ -856,16 +856,30 @@ class UIManager {
      * 处理 .osu / .osz 文件导入
      * - .osu：直接解析文本谱面（无音频时回退到预设音乐）
      * - .osz：解压并选择第一个合法的 osu!mania 4K 谱面，同时加载其音频
+     * 移动端大文件（.osz 可达 90MB+）解析耗时较长：显示进度 toast + 防重复触发
      */
     async handleOsuImport(event) {
         const file = event.target.files[0];
         if (!file) return;
 
+        // 防重复：上一次导入尚未完成时忽略本次
+        if (this._importBusy) {
+            event.target.value = '';
+            return;
+        }
+        this._importBusy = true;
+
         const ext = file.name.split('.').pop().toLowerCase();
+        const isOsz = ext === 'osz';
         try {
+            if (isOsz) {
+                this._showImportToast(`解压 ${file.name}…`);
+                // 让出主线程，确保 toast 先渲染
+                await new Promise(r => setTimeout(r, 50));
+            }
             if (ext === 'osu') {
                 await this._importOsuFile(file);
-            } else if (ext === 'osz') {
+            } else if (isOsz) {
                 await this._importOszFile(file);
             } else {
                 alert('Unsupported file type. Please select a .osu or .osz file.');
@@ -875,8 +889,28 @@ class UIManager {
             alert(`Failed to import osu! beatmap.\n\n${err.message}`);
             this.clearSelection();
         } finally {
+            this._importBusy = false;
+            this._hideImportToast();
             event.target.value = ''; // 允许重新选择相同文件
         }
+    }
+
+    /** 导入进度 toast */
+    _showImportToast(text) {
+        const toast = document.getElementById('importToast');
+        if (!toast) return;
+        document.getElementById('importToastText').textContent = text;
+        toast.classList.remove('hidden');
+    }
+
+    _hideImportToast() {
+        const toast = document.getElementById('importToast');
+        if (toast) toast.classList.add('hidden');
+    }
+
+    /** 让出主线程一帧（大文件解析循环中保持 UI 可响应） */
+    _yieldToUI() {
+        return new Promise(r => setTimeout(r, 0));
     }
 
     /**
@@ -906,8 +940,10 @@ class UIManager {
      * 导入 .osz 压缩包：枚举全部可玩谱面（osu!mania 4K + Malody .mc 4K）
      * - 只有一个谱面：直接导入
      * - 多个谱面：弹出选择器让用户挑选
+     * 每解析一个条目让出主线程并更新进度，避免移动端 UI 冻结
      */
     async _importOszFile(file) {
+        this._showImportToast(`读取谱面包… (${(file.size / 1048576).toFixed(1)} MB)`);
         const arrayBuffer = await file.arrayBuffer();
         const zip = new OsZipReader(arrayBuffer);
         const osuEntries = zip.listOsuEntries();
@@ -922,7 +958,10 @@ class UIManager {
             ...osuEntries.map(e => ({ entry: e, kind: 'osu' })),
             ...mcEntries.map(e => ({ entry: e, kind: 'mc' }))
         ];
-        for (const cand of allEntries) {
+        for (let i = 0; i < allEntries.length; i++) {
+            const cand = allEntries[i];
+            this._showImportToast(`解析谱面 ${i + 1}/${allEntries.length}…`);
+            await this._yieldToUI();
             try {
                 const text = await zip.readText(cand.entry);
                 let parsed;
@@ -947,9 +986,12 @@ class UIManager {
             );
         }
 
-        // 自动计算难度（参考 osu!mania 应变算法），按难度由小到大排序展示
-        for (const c of candidates) {
+        // 难度计算（谱面多时较耗时，同样分批让出主线程）
+        this._showImportToast('计算难度…');
+        for (let i = 0; i < candidates.length; i++) {
+            const c = candidates[i];
             c.difficulty = new DifficultyCalculator(c.parsed.notes).calculate();
+            if (i % 5 === 4) await this._yieldToUI();
         }
         candidates.sort((a, b) => a.difficulty.star - b.difficulty.star);
 
@@ -1153,13 +1195,19 @@ class UIManager {
 
     /** 从 .osz 中读取音频并送入音频引擎 */
     async _loadOszAudio(zip, audioEntry) {
-        const blob = await zip.readBlob(audioEntry);
-        // 释放上一次导入的音频 URL
-        if (this._importedOsuAudioUrl) {
-            URL.revokeObjectURL(this._importedOsuAudioUrl);
+        const audioName = audioEntry.name.split('/').pop();
+        this._showImportToast(`解码音频 ${audioName}…`);
+        try {
+            const blob = await zip.readBlob(audioEntry);
+            // 释放上一次导入的音频 URL
+            if (this._importedOsuAudioUrl) {
+                URL.revokeObjectURL(this._importedOsuAudioUrl);
+            }
+            this._importedOsuAudioUrl = URL.createObjectURL(blob);
+            await audioEngine.loadAudioFile(this._importedOsuAudioUrl);
+        } finally {
+            this._hideImportToast();
         }
-        this._importedOsuAudioUrl = URL.createObjectURL(blob);
-        await audioEngine.loadAudioFile(this._importedOsuAudioUrl);
     }
 
     /**

@@ -1872,6 +1872,47 @@ html.is-touch body.game-active .game-pause-btn {
     opacity: 1;
 }
 
+/* ===== 导入进度 toast（.osz 大文件解压/解析期间显示） ===== */
+.import-toast {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 64px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    font-family: var(--font-family);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text-primary);
+    background: rgba(22, 22, 31, 0.94);
+    border: 1px solid var(--border-medium);
+    border-radius: 999px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    white-space: nowrap;
+}
+
+.import-toast.hidden {
+    display: none;
+}
+
+.import-spinner {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    border: 2px solid rgba(77, 171, 247, 0.25);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 /* ===== 触屏操作指南（首次进入游戏时显示一次） ===== */
 .touch-hint {
     position: fixed;
