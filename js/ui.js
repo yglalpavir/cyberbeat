@@ -339,7 +339,7 @@ class UIManager {
         this.setupKeyboardControls();
 
         // 移动端
-        this.setupMobileControls();
+        this._setupTouchInput();
 
         // 首次用户手势解锁音频（iOS 静音策略）
         this._setupAudioUnlock();
@@ -3009,54 +3009,17 @@ class UIManager {
         return true;
     }
 
-    // ========== 移动端控制 (多点触控增强版) ==========
-    setupMobileControls() {
+    // ========== 触屏输入（全屏多点触控） ==========
+    /**
+     * 取消底部 1234 按键后，整块画布就是输入面：
+     * - 屏幕横向均分 4 轨（无需瞄准轨道）
+     * - 每根手指独立映射轨道，多点同时按下互不干扰
+     * - 滑动跨轨 = 释放旧轨 + 按下新轨（滑键 / 滚奏）
+     * - 判定区不设死区：判定线以下同样可以打击，贴近拇指自然落点
+     */
+    _setupTouchInput() {
         // 使用全局设备检测（避免触屏笔记本被误判）
         this._isTouchDevice = typeof IS_TOUCH_DEVICE !== 'undefined' ? IS_TOUCH_DEVICE : false;
-
-        // HTML 按钮绑定（pointer events 支持多指，每根手指独立 capture）
-        const mobileBtns = document.querySelectorAll('.mobile-btn');
-        mobileBtns.forEach((btn, index) => {
-            const key = KEYS[index];
-
-            const press = (e) => {
-                if (gameState.screen !== 'game' || gameState.paused) return;
-                e.preventDefault();
-                try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-                // 触控点显示（触屏来源才显示，鼠标点击不画圆环）
-                if (e.pointerType === 'touch' && renderer) {
-                    renderer.addTouchPoint(e.pointerId, e.clientX, e.clientY, index);
-                }
-                if (gameState.pressedKeys.has(key)) return;
-                btn.classList.add('active');
-                gameState.pressedKeys.add(key);
-                this.checkHit(index);
-            };
-
-            const release = (e) => {
-                if (renderer) renderer.removeTouchPoint(e ? e.pointerId : null);
-                if (e && e.preventDefault) e.preventDefault();
-                btn.classList.remove('active');
-                if (gameState.screen === 'game' && !gameState.paused && gameState.pressedKeys.has(key)) {
-                    this.checkHoldRelease(index);
-                }
-                gameState.pressedKeys.delete(key);
-            };
-
-            // pointerdown/pointerup 同时支持触摸和鼠标（多指各自独立触发）
-            btn.addEventListener('pointerdown', press);
-            btn.addEventListener('pointerup', release);
-            btn.addEventListener('pointercancel', release);
-            btn.addEventListener('pointerleave', (e) => {
-                // 鼠标移出时释放；触摸由 pointer capture 处理
-                if (e.pointerType === 'mouse') release(e);
-            });
-
-            // 防止双击缩放 / 长按选择
-            btn.addEventListener('dblclick', (e) => e.preventDefault());
-            btn.addEventListener('contextmenu', (e) => e.preventDefault());
-        });
-
         // 仅触屏设备启用游戏内手势拦截（桌面端无需）
         if (this._isTouchDevice) {
             // 阻止 iOS Safari 双指捏合缩放游戏画面
@@ -3075,89 +3038,64 @@ class UIManager {
             }, { passive: false });
         }
 
-        // Canvas 区域触控（整屏映射：触点 X 均分 4 轨，降低误触；支持滑动换轨）
+        // 全屏触控：画布即输入面（触摸事件绑定在 canvas 上）
         const canvas = document.getElementById('gameCanvas');
         if (canvas) {
-            canvas.addEventListener('touchstart', (e) => {
+            const onTouchStart = (e) => {
                 if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
                 for (const touch of e.changedTouches) {
-                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, true);
+                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, true, true);
                 }
-            }, { passive: false });
+            };
 
-            canvas.addEventListener('touchmove', (e) => {
+            const onTouchMove = (e) => {
                 if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
+                // 只在 changedTouches 上做轨道迁移：滑动跨轨 = 释放旧轨 + 按下新轨
                 for (const touch of e.changedTouches) {
-                    // 滑动换轨：跨过轨道边界时释放旧轨 / 触发新轨
-                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, true);
+                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, true, false);
                 }
-            }, { passive: false });
+            };
 
-            canvas.addEventListener('touchend', (e) => {
-                if (gameState.screen !== 'game' || gameState.paused) return;
+            // 松开即使在暂停中也处理：否则暂停时抬起手指，按键会一直卡在 pressedKeys 里
+            const onTouchEnd = (e) => {
+                if (gameState.screen !== 'game') return;
                 e.preventDefault();
                 for (const touch of e.changedTouches) {
                     this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, false);
                 }
-            }, { passive: false });
+            };
 
-            canvas.addEventListener('touchcancel', (e) => {
-                if (gameState.screen !== 'game' || gameState.paused) return;
-                for (const touch of e.changedTouches) {
-                    this._handleCanvasTouch(touch.identifier, touch.clientX, touch.clientY, false);
-                }
+            canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+            canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+            canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+            canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+            // 切后台 / 失焦：释放所有触控，避免回来时按键卡住
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) this._releaseAllTouches();
             });
+            window.addEventListener('blur', () => this._releaseAllTouches());
         }
-    }
-
-    /**
-     * 触控键区矩形（CSS 像素）：没有布局（未进入游戏）时返回 null。
-     * 用实测矩形而不是写死像素，横竖屏 / 不同机型下判定区都不会被裁掉。
-     */
-    _getTouchDockRect() {
-        if (!IS_TOUCH_DEVICE) return null;
-        const btns = document.querySelector('.mobile-btns');
-        if (!btns) return null;
-        const rect = btns.getBoundingClientRect();
-        return rect.height > 0 ? rect : null;
-    }
-
-    /** 触控键区顶边（含 6px 缓冲）：判定线始终在这条线上方 */
-    _getTouchDockTop() {
-        const rect = this._getTouchDockRect();
-        if (rect) return rect.top - 6;
-        const fallback = renderer ? renderer.canvasHeight : window.innerHeight;
-        return fallback - ((renderer && renderer._controlsHeight) || 92) - 12;
     }
 
     /**
      * 处理 Canvas 上的触控，映射到轨道（全屏均分映射，边缘外扩容错）
      * 状态按手指独立管理（_canvasTouchTracks: stateKey → track），
      * 多指同轨时各自独立持有，任一手指离开仅在自己"独占"该轨道时才释放按键。
-     * @param {number|string} touchId - touch.identifier / pointerId，用于区分多根手指
+     * @param {number|string} touchId - touch.identifier，用于区分多根手指
      * @param {number} clientX
      * @param {number} clientY
      * @param {boolean} isDown - true=按下/移动，false=松开
+     * @param {boolean} [isStart=false] - true=touchstart；false=touchmove（未知来源的移动不当作按下）
      */
-    _handleCanvasTouch(touchId, clientX, clientY, isDown) {
+    _handleCanvasTouch(touchId, clientX, clientY, isDown, isStart = false) {
         if (!renderer) return;
 
-        // 触点落在底部触控键区域内 → 忽略按下/移动，避免与 DOM 按钮重复触发。
-        // 只在按键区实际覆盖的横向范围内忽略（横屏时按键区只占右下角，左侧仍可点到底）。
-        // 松开事件一律处理，防止手指滑进按键区后按键/Hold 卡住。
-        if (isDown) {
-            const dock = this._getTouchDockRect();
-            if (dock) {
-                if (clientY > dock.top - 6 && clientX >= dock.left - 8 && clientX <= dock.right + 8) return;
-            } else if (clientY > this._getTouchDockTop()) {
-                return;
-            }
-        }
-
         // 全屏均分映射：无论轨道实际渲染宽度如何，屏幕 X 平均分为 4 轨。
-        // 优势：手指不需要瞄准细轨道，拇指自然分列左右即可覆盖全部轨道。
+        // 手指不需要瞄准细轨道，拇指自然分列左右即可覆盖全部轨道；
+        // 判定线以下也有效（取消底部按键后不再有"按键区"死区）。
         const trackIndex = Math.min(
             CONFIG.trackCount - 1,
             Math.max(0, Math.floor((clientX / renderer.canvasWidth) * CONFIG.trackCount))
@@ -3166,9 +3104,15 @@ class UIManager {
         const key = KEYS[trackIndex];
         const stateKey = 'c' + touchId;
 
-        // 记录该手指当前所在轨道（滑动换轨用）
         if (!this._canvasTouchTracks) this._canvasTouchTracks = new Map();
         const prevTrack = this._canvasTouchTracks.get(stateKey);
+
+        // 暂停/切后台会清空轨道映射：此后来历不明的移动或抬起一律忽略，
+        // 避免恢复后第一下移动被误当成新按下、或误释放别人按住的轨道。
+        if (prevTrack === undefined && !isStart) {
+            if (!isDown && touchFeedbackEnabled) renderer.removeTouchPoint(stateKey);
+            return;
+        }
 
         if (isDown) {
             this._canvasTouchTracks.set(stateKey, trackIndex);
@@ -3189,8 +3133,8 @@ class UIManager {
             }
         }
 
-        // 轨道状态迁移：滑动换轨 = 释放旧轨（仅独占时）+ 按下新轨
-        if (prevTrack !== undefined && prevTrack !== trackIndex) {
+        // 滑动换轨：只有"按下/移动"才迁移，松开时按当前绑定轨道结算
+        if (isDown && prevTrack !== undefined && prevTrack !== trackIndex) {
             this._releaseTrackIfUnheld(prevTrack);
         }
 
@@ -3202,8 +3146,7 @@ class UIManager {
             }
         } else {
             // 松开：仅当没有其他手指仍在此轨道时才释放 hold 与按键
-            if (!this._isTrackHeldByOtherTouch(trackIndex, stateKey)
-                && !this._isTrackHeldByButton(trackIndex)) {
+            if (!this._isTrackHeldByOtherTouch(trackIndex, stateKey)) {
                 this.checkHoldRelease(trackIndex);
                 gameState.pressedKeys.delete(key);
             }
@@ -3213,6 +3156,19 @@ class UIManager {
     /** 清除滑动换轨的手指轨道映射（暂停/重开时调用） */
     _clearCanvasTouchTracks() {
         if (this._canvasTouchTracks) this._canvasTouchTracks.clear();
+    }
+
+    /** 清除所有触控状态（切后台 / 失焦 / 暂停重开）：不判定、不结算，只防止按键卡住 */
+    _releaseAllTouches() {
+        if (this._canvasTouchTracks) {
+            for (const stateKey of this._canvasTouchTracks.keys()) {
+                if (renderer) renderer.removeTouchPoint(stateKey);
+            }
+            this._canvasTouchTracks.clear();
+        }
+        if (typeof gameState !== 'undefined' && gameState.pressedKeys) {
+            gameState.pressedKeys.clear();
+        }
     }
 
     // ========== 触屏操作指南 ==========
@@ -3234,21 +3190,12 @@ class UIManager {
         return false;
     }
 
-    /** 某轨道是否被底部触控键按住（键盘字母按钮 / DOM 按键） */
-    _isTrackHeldByButton(track) {
-        // 触控键按钮的按住状态用 .active class 标记
-        const btn = document.querySelector(`.mobile-btn[data-track="${track}"]`);
-        return !!(btn && btn.classList.contains('active'));
-    }
-
     /** 释放某轨道（若无其他持有者）——滑动换轨离开旧轨时调用 */
     _releaseTrackIfUnheld(track) {
         if (this._isTrackHeldByOtherTouch(track, '__slide__')) return;
-        if (this._isTrackHeldByButton(track)) return;
         this.checkHoldRelease(track);
         gameState.pressedKeys.delete(KEYS[track]);
     }
-
     /** 是否处于暂停恢复倒计时阶段（画面冻结、判定暂停，但 DOM 界面活跃） */
     _isResumeCounting() {
         return gameState.resumeCountdownUntil > 0 && !gameState.paused;

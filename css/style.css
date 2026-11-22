@@ -2678,111 +2678,6 @@ html.is-touch .pause-hint {
 }
 
 /* ============================================================
-   移动端控制（触控轨道按键）
-   仅游戏进行中显示，避免遮挡选曲/设置/结算/排行榜界面
-   ============================================================ */
-#mobileControls {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    z-index: 20;
-    pointer-events: none;
-    padding: env(safe-area-inset-bottom, 10px) 6px 8px 6px;
-    /* 扁平：实色底板，不用渐变蒙层 */
-    background: #0b0b12;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-body.game-active #mobileControls {
-    display: block;
-}
-
-.mobile-btns {
-    display: flex;
-    justify-content: center;
-    gap: 6px;
-    height: 72px;
-    pointer-events: auto;
-    width: 100%;
-    max-width: var(--playfield-width, 380px);
-    margin: 0 auto;
-    padding: 2px;
-}
-
-.mobile-btn {
-    --lane: #4dabf7;
-    --lane-rgb: 77, 171, 247;
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--font-family);
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--lane);
-    background: #14141c;
-    border: 1px solid rgba(var(--lane-rgb), 0.45);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: transform 0.06s ease, background 0.08s ease, color 0.08s ease, border-color 0.08s ease;
-    -webkit-tap-highlight-color: transparent;
-    /* manipulation 仍会延迟 click，游戏按键需要即时响应 */
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-    position: relative;
-    overflow: hidden;
-    /* 底部与手势条保持距离，手指按压区域更大 */
-    min-height: 64px;
-    box-shadow: none;
-}
-
-/* 按下：整块填成轨道色，文字反色 —— 纯色状态切换，无渐变 / 无发光 */
-.mobile-btn:active,
-.mobile-btn.active {
-    background: var(--lane);
-    border-color: var(--lane);
-    color: #08080e;
-    transform: translateY(1px);
-}
-
-.mobile-btn:nth-child(1) { --lane: #4dabf7; --lane-rgb: 77, 171, 247; }
-.mobile-btn:nth-child(2) { --lane: #69db7c; --lane-rgb: 105, 219, 124; }
-.mobile-btn:nth-child(3) { --lane: #ff6b6b; --lane-rgb: 255, 107, 107; }
-.mobile-btn:nth-child(4) { --lane: #ffd43b; --lane-rgb: 255, 212, 59; }
-
-/* 移动端提示标签 (显示按键字母) */
-.mobile-btn::before {
-    content: attr(data-track-label);
-    position: absolute;
-    top: 5px;
-    font-size: 0.55rem;
-    font-weight: 600;
-    opacity: 0.6;
-    letter-spacing: 0.5px;
-    color: currentColor;
-}
-
-/* 纯触屏设备：隐藏键盘字母，放大居中轨道数字 */
-html.is-touch .mobile-btn {
-    font-size: 0;
-}
-
-html.is-touch .mobile-btn::before {
-    position: static;
-    transform: translateY(0);
-    font-size: 1.25rem;
-    font-weight: 700;
-    opacity: 1;
-    letter-spacing: 0;
-    color: currentColor;
-    text-shadow: none;
-}
-
-/* ============================================================
    手机竖屏 (< 768px)
    ============================================================ */
 @media (max-width: 768px) and (orientation: portrait) {
@@ -3194,24 +3089,6 @@ html.is-touch .mobile-btn::before {
     .lb-card .btn { min-height: 38px; }
 
     /* ===== 游玩：触控栏对齐轨道区，性能面板让开 HUD ===== */
-    #mobileControls {
-        left: 50%;
-        right: auto;
-        transform: translateX(-50%);
-        width: calc(var(--playfield-width, 380px) + 12px);
-        max-width: 100%;
-        padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)) 6px;
-        background: #0b0b12;
-        border-left: 1px solid rgba(255, 255, 255, 0.08);
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 8px 8px 0 0;
-    }
-
-    .mobile-btns { height: 52px; gap: 4px; max-width: 100%; }
-    .mobile-btn { font-size: 1rem; min-height: 46px; }
-
-    /* 性能面板：放在轨道区左侧的空白处（触控栏居中，左侧不会被挡） */
     #perfMonitor {
         top: auto;
         bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
@@ -3238,7 +3115,6 @@ html.is-touch .mobile-btn::before {
 }
 
 /* 非触屏设备（鼠标精确指针）永不显示触控键，即使窗口矮/窄 */
-html.is-pointer-fine body.game-active #mobileControls { display: none; }
 html.is-pointer-fine .game-pause-btn { display: none; }
 
 /* 游玩中隐藏鼠标指针，减少视觉干扰；暂停时恢复 */
@@ -3251,9 +3127,7 @@ html.is-pointer-fine body.game-active:not(.paused) {
    ============================================================ */
 @media (max-width: 380px) and (orientation: portrait) {
     html { font-size: 14px; }
-
-    .mobile-btns { height: 66px; gap: 4px; }
-    .mobile-btn { font-size: 1.2rem; border-radius: 10px; min-height: 54px; }
+
 
     #perfMonitor { bottom: calc(env(safe-area-inset-bottom, 0px) + 6px); }
 

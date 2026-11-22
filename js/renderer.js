@@ -25,7 +25,7 @@ const SKIN_DRAW = {
 
 // 触屏设备的判定线位置：占「可用高度（扣掉触控栏与安全区）」的比例。
 // 手机上判定线过高会挤压读谱空间，过低则判定区被拇指/触控栏挡住，0.70 是两者的折中。
-const MOBILE_HIT_FRACTION = 0.70;
+const MOBILE_HIT_FRACTION = 0.78;
 
 class Renderer {
     constructor(canvas, ctx) {
@@ -172,30 +172,23 @@ class Renderer {
             });
         }
 
-        // 判定线：为底部触控键和安全区留出空间，避免音符被手指/手势条遮挡
-        this._controlsHeight = IS_TOUCH_DEVICE ? (this.canvasHeight <= 520 ? 68 : 92) : 0;
-        const reservedBottom = this._controlsHeight + this._safeBottom + 12;
+        // 判定线：取消底部 1234 按键后不再为触控栏预留高度，只避让安全区与拇指区
+        this._controlsHeight = 0;
+        const reservedBottom = this._safeBottom + 24;
         const availableHeight = Math.max(180, this.canvasHeight - reservedBottom);
         // 内置皮肤用 CONFIG.judgmentLineY；Malody 皮肤由脚本的 HITPOSITION 决定（越大越靠上）
         let desiredY = this.skin
             ? reservedBottom + (this.canvasHeight - reservedBottom) * this.skin.hitFraction
             : this.canvasHeight * CONFIG.judgmentLineY;
 
-        // 触屏设备：判定线必须落在拇指区上方，否则线附近的可点区域被底部触控栏吃掉。
-        // 以「可用高度」的比例给一个上限（手机上约 72%），桌面端行为不变。
+        // 触屏设备：整屏可点，判定线可以更靠下（读谱空间更大），只留出拇指/手势条余量
         if (IS_TOUCH_DEVICE) {
             const mobileTargetY = reservedBottom + availableHeight * MOBILE_HIT_FRACTION;
             desiredY = Math.min(desiredY, mobileTargetY);
         }
-        this._touchPlayfieldBottom = 0;   // 触控栏顶边（由 UI 测量后写入）
 
         const maxY = Math.max(120, availableHeight - 18);
-        this._judgmentY = Math.min(Math.max(availableHeight * 0.62, Math.min(desiredY, maxY)), this.canvasHeight - 40);
-        if (IS_TOUCH_DEVICE) {
-            // 再保证判定线至少高于触控栏 24px（触控栏高度按经验值预估，UI 会写入实测值）
-            const dockTop = this.canvasHeight - (this._controlsHeight + this._safeBottom);
-            this._judgmentY = Math.min(this._judgmentY, Math.max(120, dockTop - 24));
-        }
+        this._judgmentY = Math.min(Math.max(availableHeight * 0.62, Math.min(desiredY, maxY)), this.canvasHeight - 24);
 
         // HUD 缩放（小屏使用较小字号，但不低于可读下限）
         this._hudScale = Math.max(0.78, Math.min(1, Math.min(this.canvasWidth, this.canvasHeight) / 480));
@@ -1008,10 +1001,8 @@ class Renderer {
         this._lastCombo = gameState.combo;
         if (this._comboPop > 0) this._comboPop = Math.max(0, this._comboPop - 0.07 * scale);
 
-        // 矮窗口（横屏手机）时性能面板固定在左上，HUD 整体下移避让
-        const perfAvoid = (h <= 520 && IS_TOUCH_DEVICE) ? 26 : 0;
         const left = this._safeLeft + 26 * s;
-        const top = this._safeTop + (22 + perfAvoid) * s;
+        const top = this._safeTop + 22 * s;
 
         ctx.save();
 
@@ -1076,7 +1067,7 @@ class Renderer {
         const healthW = Math.min(210 * s, w * 0.34);
         const healthH = 8 * s;
         const hX = Math.round(w - this._safeRight - this._hudRightInset - healthW - 24 * s);
-        const hY = Math.round(this._safeTop + (30 + perfAvoid) * s);
+        const hY = Math.round(this._safeTop + 30 * s);
         const healthColor = healthRatio > 0.6 ? '#69db7c' : healthRatio > 0.3 ? '#ffd43b' : '#ff6b6b';
 
         ctx.textAlign = 'right';
