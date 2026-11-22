@@ -3,6 +3,18 @@
 const HUD_FONT_STACK = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`;
 const HUD_MONO_STACK = `'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, monospace`;
 
+// 扁平配色：纯色块 + 纯色文字，不依赖渐变 / 发光
+const FLAT_PALETTE = {
+    bg: '#0b0b12',
+    field: '#12121b',
+    laneAlt: '#16161f',
+    fieldBorder: 'rgba(255, 255, 255, 0.1)',
+    laneLine: 'rgba(255, 255, 255, 0.06)',
+    text: '#ffffff',
+    textDim: 'rgba(255, 255, 255, 0.45)',
+    track: 'rgba(255, 255, 255, 0.1)'
+};
+
 class Renderer {
     constructor(canvas, ctx) {
         this.canvas = canvas;
@@ -28,14 +40,6 @@ class Renderer {
 
         // 预计算轨道坐标
         this.trackPositions = [];   // [{x, cx, hitX, hitW}]
-
-        // 缓存背景
-        this._bgGradient = null;
-        this._bgVignette = null;
-        this._laneFieldGradient = null;
-        this._dangerVignette = null;
-        this._bgCacheWidth = 0;
-        this._bgCacheHeight = 0;
 
         // delta-time（毫秒），默认 60fps
         this._dt = 16.67;
@@ -148,12 +152,6 @@ class Renderer {
             CONFIG.effects.particleCount = 5;
         }
 
-        // 清除缓存
-        this._bgGradient = null;
-        this._bgVignette = null;
-        this._laneFieldGradient = null;
-        this._dangerVignette = null;
-
         this.ctx.imageSmoothingEnabled = false;
     }
 
@@ -162,39 +160,15 @@ class Renderer {
         this._songInfo = info || null;
     }
 
-    // ========== 背景 (缓存渐变) ==========
+    // ========== 背景（扁平纯色） ==========
     drawBackground(time) {
         const ctx = this.ctx;
-
-        if (!this._bgGradient || this._bgCacheWidth !== this.canvasWidth || this._bgCacheHeight !== this.canvasHeight) {
-            this._bgGradient = ctx.createLinearGradient(0, 0, 0, this.canvasHeight);
-            this._bgGradient.addColorStop(0, '#0f0f18');
-            this._bgGradient.addColorStop(1, '#1a1a28');
-            this._bgCacheWidth = this.canvasWidth;
-            this._bgCacheHeight = this.canvasHeight;
-        }
-
-        ctx.fillStyle = this._bgGradient;
-        ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
-
-        // 暗角：把视觉焦点收拢到轨道区域，减少边缘干扰
-        if (!this._bgVignette) {
-            const w = this.canvasWidth;
-            const h = this.canvasHeight;
-            const g = ctx.createRadialGradient(
-                w / 2, h * 0.44, Math.min(w, h) * 0.12,
-                w / 2, h * 0.5, Math.max(w, h) * 0.72
-            );
-            g.addColorStop(0, 'rgba(0,0,0,0)');
-            g.addColorStop(0.62, 'rgba(0,0,0,0.18)');
-            g.addColorStop(1, 'rgba(0,0,0,0.58)');
-            this._bgVignette = g;
-        }
-        ctx.fillStyle = this._bgVignette;
+        // 扁平设计：单一纯色底面，不用渐变与暗角，轨道区域的层次交给 drawTracks 的色块
+        ctx.fillStyle = FLAT_PALETTE.bg;
         ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
 
-    // ========== 轨道 (批量绘制) ==========
+    // ========== 轨道（扁平色块） ==========
     drawTracks() {
         const ctx = this.ctx;
         const positions = this.trackPositions;
@@ -214,102 +188,79 @@ class Renderer {
         }
         if (this._hitPulse > 0) this._hitPulse = Math.max(0, this._hitPulse - 0.08 * scale);
 
-        // 专用 playfield 底：顶部渐隐，底部略暗
-        if (!this._laneFieldGradient) {
-            const g = ctx.createLinearGradient(0, 0, 0, h);
-            g.addColorStop(0, 'rgba(8, 8, 15, 0)');
-            g.addColorStop(0.16, 'rgba(8, 8, 15, 0.42)');
-            g.addColorStop(0.72, 'rgba(8, 8, 15, 0.58)');
-            g.addColorStop(1, 'rgba(5, 5, 10, 0.72)');
-            this._laneFieldGradient = g;
-        }
-        ctx.fillStyle = this._laneFieldGradient;
+        // 轨道区：纯色块 + 交替轨底色
+        ctx.fillStyle = FLAT_PALETTE.field;
         ctx.fillRect(fieldX, 0, fieldW, h);
-
-        // 交替轨道底色，增强 4K 轨道辨识度
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.018)';
+        ctx.fillStyle = FLAT_PALETTE.laneAlt;
         for (let i = 1; i < positions.length; i += 2) {
             ctx.fillRect(positions[i].x, 0, trackW, h);
         }
 
-        // 按下 / 命中光柱
+        // 按下 / 命中 / 漏击：实色块提示（不使用渐变光柱）
         for (let i = 0; i < positions.length; i++) {
             const pressed = gameState.pressedKeys.has(KEYS[i]);
             const flash = this._laneFlash[i];
             if (!pressed && flash <= 0.01) continue;
             const color = pressed ? TRACK_COLORS[i] : this._laneFlashColor[i];
-            const intensity = Math.max(pressed ? 0.17 : 0, flash * 0.42);
-            const glowH = Math.min(h * 0.55, 260);
-            const g = ctx.createLinearGradient(0, judgmentY - glowH, 0, judgmentY);
-            g.addColorStop(0, _withAlpha(color, 0));
-            g.addColorStop(1, _withAlpha(color, intensity));
-            ctx.fillStyle = g;
-            ctx.fillRect(positions[i].x, judgmentY - glowH, trackW, glowH);
-            ctx.fillStyle = _withAlpha(color, intensity * 0.35);
-            ctx.fillRect(positions[i].x, judgmentY, trackW, 44);
+
+            // 按住时整轨淡色底
+            if (pressed) {
+                ctx.fillStyle = _withAlpha(color, 0.1);
+                ctx.fillRect(positions[i].x, 0, trackW, judgmentY);
+            }
+
+            // 命中 / 漏击：判定线上方一条实色横带
+            if (flash > 0.01) {
+                const bandH = 54;
+                ctx.fillStyle = _withAlpha(color, 0.09 + flash * 0.13);
+                ctx.fillRect(positions[i].x, judgmentY - bandH, trackW, bandH);
+            }
         }
 
-        // 轨道分隔线
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.055)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let i = 0; i < positions.length; i++) {
-            const x = positions[i].x;
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, h);
-            ctx.moveTo(x + trackW, 0);
-            ctx.lineTo(x + trackW, h);
+        // 轨道分隔线 + 外框：1px 实线
+        ctx.fillStyle = FLAT_PALETTE.laneLine;
+        for (let i = 0; i <= positions.length; i++) {
+            const x = i < positions.length ? positions[i].x : positions[positions.length - 1].x + trackW;
+            ctx.fillRect(Math.round(x), 0, 1, h);
         }
-        ctx.stroke();
+        ctx.fillStyle = FLAT_PALETTE.fieldBorder;
+        ctx.fillRect(Math.round(fieldX), 0, 1, h);
+        ctx.fillRect(Math.round(fieldX + fieldW) - 1, 0, 1, h);
 
-        // playfield 外框
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
-        ctx.fillRect(fieldX, 0, 1, h);
-        ctx.fillRect(fieldX + fieldW - 1, 0, 1, h);
-
-        // 判定线：外层光晕 + 轨道色段 + 白色核心
-        const pulse = this._hitPulse;
-        ctx.fillStyle = `rgba(255, 255, 255, ${(0.045 + pulse * 0.07).toFixed(3)})`;
-        ctx.fillRect(fieldX, judgmentY - 7, fieldW, 14);
+        // 判定线：2px 纯白主线（命中时短暂加粗到 3px，不用发光）
+        const lineH = this._hitPulse > 0.1 ? 3 : 2;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.fillRect(fieldX, Math.round(judgmentY - lineH / 2), fieldW, lineH);
 
         for (let i = 0; i < positions.length; i++) {
             const pressed = gameState.pressedKeys.has(KEYS[i]);
-            ctx.fillStyle = _withAlpha(TRACK_COLORS[i], pressed ? 0.85 : 0.3);
-            ctx.fillRect(positions[i].x + 1, judgmentY - 1, trackW - 2, 2);
+            // 轨道色刻度：未按下 8px，按下时整条轨道色块加粗
+            ctx.fillStyle = TRACK_COLORS[i];
+            ctx.globalAlpha = pressed ? 1 : 0.55;
+            ctx.fillRect(positions[i].x + 1, judgmentY + 2, trackW - 2, 3);
+            ctx.globalAlpha = 1;
         }
 
-        ctx.fillStyle = `rgba(255, 255, 255, ${(0.55 + pulse * 0.45).toFixed(3)})`;
-        ctx.fillRect(fieldX, judgmentY + 0.5, fieldW, 1.5);
-
-        // 判定线上的键位接收器（Key Cap）
+        // 键位接收器：扁平圆角块
         for (let i = 0; i < positions.length; i++) {
             const pressed = gameState.pressedKeys.has(KEYS[i]);
             const cx = positions[i].cx;
-            const capW = trackW - 14;
-            const capX = cx - capW / 2;
+            const capW = trackW - 18;
+            const capH = 10;
+            const capX = Math.round(cx - capW / 2);
+            const capY = Math.round(judgmentY - capH / 2);
             const color = TRACK_COLORS[i];
 
-            if (pressed) {
-                ctx.globalAlpha = 0.28;
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.roundRect(capX - 4, judgmentY - 8, capW + 8, 16, 8);
-                ctx.fill();
-                ctx.globalAlpha = 1;
-            }
-
-            ctx.globalAlpha = pressed ? 1 : 0.38;
-            ctx.fillStyle = color;
+            ctx.fillStyle = pressed ? color : FLAT_PALETTE.field;
             ctx.beginPath();
-            ctx.roundRect(capX, judgmentY - 3, capW, 6, 3);
+            ctx.roundRect(capX, capY, capW, capH, 2);
             ctx.fill();
 
-            ctx.globalAlpha = pressed ? 0.65 : 0.22;
-            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = pressed ? color : _withAlpha(color, 0.55);
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.roundRect(capX + 2, judgmentY - 2.5, capW - 4, 2, 1);
-            ctx.fill();
-            ctx.globalAlpha = 1;
+            ctx.roundRect(capX + 0.5, capY + 0.5, capW - 1, capH - 1, 2);
+            ctx.stroke();
         }
 
         // 桌面端在判定线下方显示键位提示
@@ -318,7 +269,7 @@ class Renderer {
             ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.24)';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
             for (let i = 0; i < positions.length; i++) {
                 ctx.fillText(TRACK_KEYS[i], positions[i].cx, judgmentY + 20 * s);
             }
@@ -461,145 +412,81 @@ class Renderer {
     }
 
     /**
-     * 绘制 Hold 长条体
+     * 绘制 Hold 长条体（扁平：实色块 + 1px 描边）
      * @param {boolean} isActive - 是否按住中
      * @param {number} holdProgress - 按住进度 0~1（未按住时为 0），
-     *   按住中的长条体以亮度渐变显示进度：已按过部分更亮，未到部分较暗
+     *   按住中时用一块实色已判定区表示进度，不做渐变过渡
      */
     _drawHoldBody(x, yTop, yBottom, color, isActive, holdProgress = 0) {
         const ctx = this.ctx;
         const trackW = CONFIG.trackWidth;
         const bodyW = trackW - 8;
         const bodyX = x + 4;
-        const tailH = 16;
+        const tailH = 14;
         const bodyTop = yTop + tailH;
         const bodyHeight = yBottom - bodyTop;
-        const alpha = isActive ? 0.6 : 0.35;
+        const radius = noteStyle === 'pixel' ? 1 : 3;
 
         if (bodyHeight > 0) {
+            // 长条主体：低调实色
+            ctx.fillStyle = _withAlpha(color, isActive ? 0.32 : 0.22);
+            ctx.fillRect(bodyX, bodyTop, bodyW, bodyHeight);
+
+            // 左右 1px 描边，替代高光条
+            ctx.fillStyle = _withAlpha(color, isActive ? 0.9 : 0.6);
+            ctx.fillRect(bodyX, bodyTop, 1, bodyHeight);
+            ctx.fillRect(bodyX + bodyW - 1, bodyTop, 1, bodyHeight);
+
+            // 按住进度：从判定线一侧向上生长的实色块
             if (isActive && holdProgress > 0) {
-                // 按住中：上下分段渐变（底部=已按过部分=更亮，顶部=未到部分=较暗）
-                // 判定线在屏幕下方、音符自上而落，长条尾部(下方)先经过判定线；
-                // 进度从头部开始累积，用垂直渐变表达：越接近判定线越亮
-                const grad = ctx.createLinearGradient(0, bodyTop, 0, yBottom);
-                const litAlpha = Math.min(0.95, 0.45 + holdProgress * 0.5);
-                grad.addColorStop(0, _withAlpha(color, 0.4));
-                grad.addColorStop(1, _withAlpha(color, litAlpha));
-                ctx.globalAlpha = 1;
-                ctx.fillStyle = grad;
-            } else {
-                ctx.globalAlpha = alpha;
-                ctx.fillStyle = color;
+                const litH = Math.max(2, bodyHeight * Math.min(1, holdProgress));
+                ctx.fillStyle = _withAlpha(color, 0.75);
+                ctx.fillRect(bodyX + 1, yBottom - litH, bodyW - 2, litH);
             }
-
-            ctx.beginPath();
-            ctx.roundRect(bodyX, bodyTop, bodyW, bodyHeight, 4);
-            ctx.fill();
-
-            // 内部高光条 + 中央细线，长条更有材质感
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
-            ctx.fillRect(bodyX + 3, bodyTop, 3, bodyHeight);
-            ctx.fillRect(bodyX + bodyW - 6, bodyTop, 3, bodyHeight);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.fillRect(bodyX + bodyW / 2 - 1, bodyTop, 2, bodyHeight);
-
-            // 按住中：判定线附近额外亮起，强调持续输入
-            if (isActive) {
-                const glowH = Math.min(80, bodyHeight);
-                const glow = ctx.createLinearGradient(0, yBottom - glowH, 0, yBottom);
-                glow.addColorStop(0, _withAlpha(color, 0));
-                glow.addColorStop(1, _withAlpha(color, 0.35));
-                ctx.fillStyle = glow;
-                ctx.fillRect(bodyX, yBottom - glowH, bodyW, glowH);
-            }
-            ctx.globalAlpha = 1.0;
         }
 
+        // 头部（判定线一侧）：与 Tap 同款扁平块
         if (yBottom > -50 && yBottom < this.canvasHeight) {
             this._drawNoteByStyle(x, yBottom, color);
         }
 
+        // 尾部：较薄的扁平块
         if (yTop > -50 && yTop < this.canvasHeight) {
-            ctx.globalAlpha = alpha * 0.8;
-            ctx.fillStyle = color;
+            const tailX = bodyX;
+            const tailW = bodyW;
+            ctx.fillStyle = _withAlpha(color, 0.55);
             ctx.beginPath();
-            ctx.roundRect(bodyX, yTop, bodyW, tailH, 4);
+            ctx.roundRect(tailX, yTop, tailW, tailH, radius);
             ctx.fill();
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.fillRect(bodyX, yTop + tailH - 3, bodyW, 3);
-            ctx.globalAlpha = 1.0;
+            ctx.strokeStyle = _withAlpha(color, 0.75);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(tailX + 0.5, yTop + 0.5, tailW - 1, tailH - 1, radius);
+            ctx.stroke();
         }
     }
 
     _drawNoteByStyle(x, y, color) {
         const ctx = this.ctx;
-        const w = CONFIG.trackWidth - 4;
+        const w = CONFIG.trackWidth - 6;
         const h = 24;
+        const nx = x + 3;
+        const radius = noteStyle === 'pixel' ? 0 : 3;
 
-        if (noteStyle === 'orb') {
-            const radius = CONFIG.trackWidth * 0.45;
-            const cx = x + CONFIG.trackWidth / 2;
-            const cy = y + h / 2;
+        // 扁平音符：纯色块 + 1px 描边，无渐变 / 无外发光 / 无高光
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(nx, y + 2, w, h, radius);
+        ctx.fill();
 
-            // 外圈柔光
-            ctx.globalAlpha = 0.16;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius + 5, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-
-            // 主体
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-            ctx.fill();
-
-            // 顶部高光 + 白色描边，提升立体感
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
-            ctx.beginPath();
-            ctx.arc(cx - radius * 0.16, cy - radius * 0.2, radius * 0.58, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(cx, cy, radius - 0.75, 0, Math.PI * 2);
-            ctx.stroke();
-        } else {
-            const nx = x + 2;
-
-            // 外圈柔光
-            ctx.globalAlpha = 0.14;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.roundRect(nx - 2, y - 2, w + 4, h + 4, 8);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-
-            // 主体
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.roundRect(nx, y, w, h, 6);
-            ctx.fill();
-
-            // 顶部高光 + 底部暗边
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
-            ctx.beginPath();
-            ctx.roundRect(nx + 2, y + 2, w - 4, 6, 3);
-            ctx.fill();
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-            ctx.fillRect(nx + 2, y + h - 4, w - 4, 2);
-
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.roundRect(nx + 0.5, y + 0.5, w - 1, h - 1, 5.5);
-            ctx.stroke();
-        }
+        ctx.strokeStyle = 'rgba(10, 10, 16, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(nx + 0.5, y + 2.5, w - 1, h - 1, radius);
+        ctx.stroke();
     }
 
-    // ========== 倒计时 ==========
+    // ========== 倒计时（扁平） ==========
     /** @param {boolean} resumeMode true = 暂停恢复倒计时（数字略小并显示 READY 提示） */
     drawCountdown(secondsLeft, resumeMode = false) {
         if (secondsLeft <= 0) return;
@@ -610,56 +497,48 @@ class Renderer {
         const centerX = w / 2;
         const centerY = h * 0.46;
         const color = resumeMode ? '#69db7c' : '#4dabf7';
-        const frac = secondsLeft - Math.floor(secondsLeft);
-        const radius = (resumeMode ? 46 : 58) * Math.max(0.85, s) * (1 + frac * 0.045);
-        const fontSize = (resumeMode ? 44 : 56) * Math.max(0.85, s);
+        const radius = (resumeMode ? 44 : 56) * Math.max(0.85, s);
+        const fontSize = (resumeMode ? 42 : 54) * Math.max(0.85, s);
 
         ctx.save();
 
-        // 倒计时期间压暗画面，把注意力集中到中央
-        ctx.fillStyle = 'rgba(4, 4, 10, 0.42)';
+        // 扁平：整屏实色压暗
+        ctx.fillStyle = 'rgba(6, 6, 12, 0.62)';
         ctx.fillRect(0, 0, w, h);
 
-        // 外圈柔光
-        ctx.globalAlpha = 0.16;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, radius + 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        // 实色底板方块 + 1px 描边
+        const box = radius + 22 * s;
+        ctx.fillStyle = '#12121b';
+        ctx.fillRect(centerX - box, centerY - box, box * 2, box * 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(centerX - box + 0.5, centerY - box + 0.5, box * 2 - 1, box * 2 - 1);
 
         // 底环
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.lineWidth = 5 * s;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 4 * s;
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
         ctx.stroke();
 
-        // 进度环
+        // 进度环：实色弧线，无发光
         const progress = Math.max(0, Math.min(1, 1 - (secondsLeft / (CONFIG.countdownDuration / 1000))));
         ctx.strokeStyle = color;
-        ctx.lineCap = 'round';
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 16 * s;
+        ctx.lineCap = 'butt';
         ctx.beginPath();
         ctx.arc(centerX, centerY, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
         ctx.stroke();
-        ctx.shadowBlur = 0;
-        ctx.lineCap = 'butt';
 
         // 数字
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = `800 ${fontSize}px ${HUD_MONO_STACK}`;
         ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 18 * s;
         ctx.fillText(Math.ceil(secondsLeft).toString(), centerX, centerY + 2 * s);
-        ctx.shadowBlur = 0;
 
         // 状态标签
         ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fillStyle = FLAT_PALETTE.textDim;
         ctx.fillText(resumeMode ? 'R E S U M E' : 'G E T   R E A D Y', centerX, centerY - radius - 24 * s);
         ctx.fillStyle = color;
         ctx.fillText(resumeMode ? 'BACK IN' : 'STAY ON BEAT', centerX, centerY + radius + 26 * s);
@@ -732,9 +611,10 @@ class Renderer {
             l.alpha -= fadeRate;
             if (l.alpha <= 0 || l.timeElapsed > maxDuration) { l.active = false; continue; }
             pool[validCount++] = l;
-            ctx.globalAlpha = l.alpha * 0.4;
+            // 扁平：2px 实色竖线，无发光
+            ctx.globalAlpha = l.alpha * 0.45;
             ctx.fillStyle = l.color;
-            ctx.fillRect(l.x - 2, startY - l.height, 4, l.height);
+            ctx.fillRect(Math.round(l.x) - 1, startY - l.height, 2, l.height);
         }
         this._laserPoolIdx = validCount;
         ctx.globalAlpha = 1.0;
@@ -804,11 +684,11 @@ class Renderer {
             p.life -= decay;
             if (p.life <= 0 || p.timeElapsed > maxDuration) { p.active = false; continue; }
             pool[validCount++] = p;
-            ctx.globalAlpha = p.life * 0.6;
+            // 扁平：小方块粒子
+            const size = Math.max(2, Math.round(p.size * p.life));
+            ctx.globalAlpha = p.life * 0.7;
             ctx.fillStyle = p.color;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(Math.round(p.x - size / 2), Math.round(p.y - size / 2), size, size);
         }
         this._particlePoolIdx = validCount;
         ctx.globalAlpha = 1.0;
@@ -887,16 +767,14 @@ class Renderer {
             const isPerfect = j.text === 'PERFECT';
             const isGreat = j.text === 'GREAT';
             const color = isPerfect ? '#ffd43b' : isGreat ? '#69db7c' : '#ff6b6b';
-            const baseSize = isPerfect ? 17 : isGreat ? 15 : 16;
+            const baseSize = isPerfect ? 16 : isGreat ? 14 : 15;
             ctx.globalAlpha = j.alpha;
             ctx.font = `800 ${Math.round(baseSize * this._hudScale * j.bounce)}px ${HUD_FONT_STACK}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            // 扁平：纯色文字，无发光
             ctx.fillStyle = color;
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 12 * this._hudScale;
             ctx.fillText(j.text, x, j.y);
-            ctx.shadowBlur = 0;
         }
         this._judgmentPoolIdx = validCount;
         ctx.globalAlpha = 1.0;
@@ -932,24 +810,14 @@ class Renderer {
         // ---- 顶部歌曲进度条 ----
         this._drawProgressBar(currentTime);
 
-        // ---- 低血量红色暗角 ----
+        // ---- 低血量：实色边框呼吸（替代径向渐变暗角） ----
         const healthInitial = CONFIG.health.initial || 100;
         const healthRatio = Math.max(0, Math.min(1, gameState.health / healthInitial));
         if (healthRatio < 0.3) {
-            if (!this._dangerVignette) {
-                const g = ctx.createRadialGradient(
-                    w / 2, h * 0.5, Math.min(w, h) * 0.24,
-                    w / 2, h * 0.5, Math.max(w, h) * 0.7
-                );
-                g.addColorStop(0, 'rgba(255, 60, 60, 0)');
-                g.addColorStop(1, 'rgba(255, 40, 60, 0.55)');
-                this._dangerVignette = g;
-            }
-            const pulse = 0.55 + 0.45 * Math.sin(now / 170);
-            ctx.globalAlpha = (1 - healthRatio / 0.3) * pulse;
-            ctx.fillStyle = this._dangerVignette;
-            ctx.fillRect(0, 0, w, h);
-            ctx.globalAlpha = 1;
+            const pulse = 0.35 + 0.35 * Math.sin(now / 170);
+            ctx.strokeStyle = `rgba(255, 90, 96, ${(pulse * (1 - healthRatio / 0.3)).toFixed(3)})`;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
         }
 
         // ---- 左上：分数 / 准确率 / 判定统计 ----
@@ -957,20 +825,17 @@ class Renderer {
         ctx.textBaseline = 'top';
 
         ctx.font = `600 ${9.5 * s}px ${HUD_FONT_STACK}`;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fillStyle = FLAT_PALETTE.textDim;
         ctx.fillText('SCORE', left, top);
 
         const scoreText = gameState.calculateFinalScore().finalScore.toLocaleString();
         ctx.font = `800 ${30 * s}px ${HUD_MONO_STACK}`;
-        ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = 'rgba(77, 171, 247, 0.55)';
-        ctx.shadowBlur = 14 * s;
+        ctx.fillStyle = FLAT_PALETTE.text;
         ctx.fillText(scoreText, left, top + 13 * s);
-        ctx.shadowBlur = 0;
 
         const acc = gameState.calculateTotalAcc();
         ctx.font = `600 ${9.5 * s}px ${HUD_FONT_STACK}`;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fillStyle = FLAT_PALETTE.textDim;
         ctx.fillText('ACCURACY', left, top + 48 * s);
         ctx.font = `700 ${14 * s}px ${HUD_MONO_STACK}`;
         ctx.fillStyle = '#a5d8ff';
@@ -999,38 +864,32 @@ class Renderer {
             cx += labelW + valueW + (this._hudCompact ? 12 : 18) * s;
         }
 
-        // ---- 右上：生命值 ----
+        // ---- 右上：生命值（扁平条 + 1px 描边） ----
         const healthW = Math.min(210 * s, w * 0.34);
-        const healthH = 7 * s;
-        const hX = w - this._safeRight - this._hudRightInset - healthW - 24 * s;
-        const hY = this._safeTop + (30 + perfAvoid) * s;
+        const healthH = 8 * s;
+        const hX = Math.round(w - this._safeRight - this._hudRightInset - healthW - 24 * s);
+        const hY = Math.round(this._safeTop + (30 + perfAvoid) * s);
         const healthColor = healthRatio > 0.6 ? '#69db7c' : healthRatio > 0.3 ? '#ffd43b' : '#ff6b6b';
 
         ctx.textAlign = 'right';
         ctx.font = `600 ${9 * s}px ${HUD_FONT_STACK}`;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fillStyle = FLAT_PALETTE.textDim;
         ctx.fillText('LIFE', hX + healthW, hY - 12 * s);
 
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.beginPath();
-        ctx.roundRect(hX, hY, healthW, healthH, healthH / 2);
-        ctx.fill();
+        ctx.fillStyle = '#1b1b26';
+        ctx.fillRect(hX, hY, healthW, healthH);
 
         if (healthRatio > 0) {
-            ctx.globalAlpha = healthRatio < 0.3 ? 0.7 + 0.3 * Math.sin(now / 150) : 1;
             ctx.fillStyle = healthColor;
-            ctx.shadowColor = healthColor;
-            ctx.shadowBlur = 8 * s;
-            ctx.beginPath();
-            ctx.roundRect(hX, hY, healthW * healthRatio, healthH, healthH / 2);
-            ctx.fill();
-            ctx.shadowBlur = 0;
-            ctx.globalAlpha = 1;
+            ctx.fillRect(hX, hY, Math.round(healthW * healthRatio), healthH);
         }
 
-        // 30% 危险刻度
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-        ctx.fillRect(hX + healthW * 0.3, hY, 1, healthH);
+        // 30% 危险刻度 + 1px 外框
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.fillRect(hX + Math.round(healthW * 0.3), hY, 1, healthH);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(hX + 0.5, hY + 0.5, healthW - 1, healthH - 1);
 
         // ---- 顶部中央：曲目信息 + 判定偏移条 ----
         if (this._songInfo && w >= 780) {
@@ -1039,24 +898,24 @@ class Renderer {
 
             ctx.textAlign = 'center';
             ctx.font = `700 ${15 * s}px ${HUD_FONT_STACK}`;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+            ctx.fillStyle = FLAT_PALETTE.text;
             ctx.fillText(this._fitText(this._songInfo.title || '', maxTitleW, ctx), centerX, top);
 
             const meta = [this._songInfo.artist, this._songInfo.difficulty].filter(Boolean).join('   ·   ');
             if (meta) {
                 ctx.font = `600 ${9.5 * s}px ${HUD_FONT_STACK}`;
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.fillStyle = FLAT_PALETTE.textDim;
                 ctx.fillText(this._fitText(meta, maxTitleW, ctx), centerX, top + 20 * s);
             }
 
             this._drawTimingBar(centerX, top + 42 * s);
         }
 
-        // ---- 中央连击 ----
+        // ---- 中央连击：纯色数字，命中时放大 ----
         // 恢复倒计时期间隐藏连击，避免与 3-2-1 圆环重叠
         if (gameState.combo > 0 && !(gameState.resumeCountdownUntil > 0)) {
-            const pop = 1 + this._comboPop * 0.18;
-            const size = 46 * s * pop;
+            const pop = 1 + this._comboPop * 0.16;
+            const size = 44 * s * pop;
             const comboX = w / 2;
             const comboY = h * 0.34;
             const hotCombo = gameState.combo >= 50;
@@ -1064,18 +923,12 @@ class Renderer {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            const grad = ctx.createLinearGradient(0, comboY - size * 0.55, 0, comboY + size * 0.4);
-            grad.addColorStop(0, '#ffffff');
-            grad.addColorStop(1, hotCombo ? '#ffd43b' : '#74c0fc');
             ctx.font = `800 ${size}px ${HUD_MONO_STACK}`;
-            ctx.fillStyle = grad;
-            ctx.shadowColor = hotCombo ? 'rgba(255, 212, 59, 0.55)' : 'rgba(77, 171, 247, 0.5)';
-            ctx.shadowBlur = 20 * s;
+            ctx.fillStyle = hotCombo ? '#ffd43b' : '#ffffff';
             ctx.fillText(gameState.combo, comboX, comboY);
-            ctx.shadowBlur = 0;
 
             ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+            ctx.fillStyle = hotCombo ? 'rgba(255, 212, 59, 0.75)' : FLAT_PALETTE.textDim;
             ctx.fillText('C O M B O', comboX, comboY + size * 0.62);
 
             ctx.textBaseline = 'top';
@@ -1084,14 +937,14 @@ class Renderer {
         ctx.restore();
     }
 
-    /** 顶部细进度条：显示当前曲目播放进度 */
+    /** 顶部细进度条：扁平实色条 + 方形播放头 */
     _drawProgressBar(currentTime) {
         const ctx = this.ctx;
         const s = this._hudScale;
-        const x = this._safeLeft + 14 * s;
-        const y = this._safeTop + 4 * s;
-        const w = this.canvasWidth - this._safeLeft - this._safeRight - 28 * s;
-        const barH = 3 * s;
+        const x = Math.round(this._safeLeft + 14 * s);
+        const y = Math.round(this._safeTop + 4 * s);
+        const w = Math.round(this.canvasWidth - this._safeLeft - this._safeRight - 28 * s);
+        const barH = 3;
 
         let total = CONFIG.songDuration;
         const chart = (typeof getLoadedChartData === 'function') ? getLoadedChartData() : null;
@@ -1106,33 +959,22 @@ class Renderer {
 
         const p = total > 0 ? Math.max(0, Math.min(1, currentTime / total)) : 0;
 
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
         ctx.fillRect(x, y, w, barH);
 
         if (p <= 0) return;
 
-        const grad = ctx.createLinearGradient(x, 0, x + w, 0);
-        grad.addColorStop(0, 'rgba(77, 171, 247, 0.75)');
-        grad.addColorStop(0.6, 'rgba(151, 117, 250, 0.85)');
-        grad.addColorStop(1, 'rgba(255, 255, 255, 0.95)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(x, y, w * p, barH);
+        // 已播放部分：单色实心条
+        const playedW = Math.round(w * p);
+        ctx.fillStyle = '#4dabf7';
+        ctx.fillRect(x, y, playedW, barH);
 
-        // 播放头
-        const headX = x + w * p;
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = '#a5d8ff';
-        ctx.beginPath();
-        ctx.arc(headX, y + barH / 2, 5 * s, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        // 播放头：2px 方形块
         ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(headX, y + barH / 2, 2.4 * s, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillRect(x + playedW - 1, y - 2, 2, barH + 4);
     }
 
-    /** 判定偏移条：显示最近一次打击的 EARLY / LATE 偏差 */
+    /** 判定偏移条：显示最近一次打击的 EARLY / LATE 偏差（扁平刻度） */
     _drawTimingBar(cx, y) {
         const lastAt = gameState.lastHitAt || 0;
         if (!lastAt) return;
@@ -1141,38 +983,32 @@ class Renderer {
 
         const ctx = this.ctx;
         const s = this._hudScale;
-        const width = 150 * s;
-        const barH = 3 * s;
-        const x = cx - width / 2;
-        const range = 120; // ±120ms 映射到进度条两端
+        const width = Math.round(150 * s);
+        const barH = 4;
+        const x = Math.round(cx - width / 2);
+        const yTop = Math.round(y);
+        const range = 120; // ±120ms 映射到两端
 
-        ctx.globalAlpha = 0.35 + (1 - Math.min(1, age / 1200)) * 0.65;
+        ctx.globalAlpha = 0.4 + (1 - Math.min(1, age / 1200)) * 0.6;
 
+        // 轨道底
         ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-        ctx.beginPath();
-        ctx.roundRect(x, y, width, barH, barH / 2);
-        ctx.fill();
+        ctx.fillRect(x, yTop, width, barH);
 
-        // Perfect 窗口高亮
-        const perfectW = (CONFIG.perfectWindow / range) * (width / 2);
-        ctx.fillStyle = 'rgba(255, 212, 59, 0.22)';
-        ctx.fillRect(cx - perfectW, y, perfectW * 2, barH);
+        // PERFECT 窗口：实色块
+        const perfectW = Math.round((CONFIG.perfectWindow / range) * (width / 2));
+        ctx.fillStyle = 'rgba(255, 212, 59, 0.45)';
+        ctx.fillRect(Math.round(cx) - perfectW, yTop, perfectW * 2, barH);
 
         // 中心基准线
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.fillRect(cx - 0.5, y - 2 * s, 1, barH + 4 * s);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.fillRect(Math.round(cx) - 1, yTop - 3, 2, barH + 6);
 
+        // 偏移标记：方形块
         const offset = Math.max(-range, Math.min(range, gameState.lastHitOffset || 0));
-        const markerX = cx + (offset / range) * (width / 2);
-        const color = Math.abs(offset) <= CONFIG.perfectWindow ? '#ffd43b' : '#69db7c';
-
-        ctx.fillStyle = color;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 8 * s;
-        ctx.beginPath();
-        ctx.arc(markerX, y + barH / 2, 3 * s, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        const markerX = Math.round(cx + (offset / range) * (width / 2));
+        ctx.fillStyle = Math.abs(offset) <= CONFIG.perfectWindow ? '#ffd43b' : '#69db7c';
+        ctx.fillRect(markerX - 2, yTop - 4, 4, barH + 8);
 
         ctx.globalAlpha = 1;
     }
@@ -1213,7 +1049,6 @@ class Renderer {
 
         const cx = this.canvasWidth / 2;
         const cy = this._judgmentY;
-        const pulse = 0.55 + 0.3 * Math.sin(performance.now() / 280);
         const label = 'SPACE ×2 跳过前奏';
         const pillH = 30 * s;
         const pillY = cy - 92 * s;
@@ -1223,27 +1058,28 @@ class Renderer {
         ctx.textBaseline = 'middle';
         const pillW = ctx.measureText(label).width + 34 * s;
 
-        // 半透明胶囊底 + 霓虹描边，与游戏内按钮语言一致
-        ctx.globalAlpha = pulse;
-        ctx.fillStyle = 'rgba(10, 10, 18, 0.72)';
+        // 扁平：纯色胶囊底 + 1px 描边，无发光
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#12121b';
         ctx.beginPath();
-        ctx.roundRect(cx - pillW / 2, pillY, pillW, pillH, pillH / 2);
+        ctx.roundRect(cx - pillW / 2, pillY, pillW, pillH, 4);
         ctx.fill();
-        ctx.strokeStyle = 'rgba(77, 171, 247, 0.42)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
         ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(cx - pillW / 2 + 0.5, pillY + 0.5, pillW - 1, pillH - 1, 4);
         ctx.stroke();
 
         // 文字：双击空格跳过前奏
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fillStyle = FLAT_PALETTE.text;
         ctx.fillText(label, cx, pillY + pillH / 2);
-        ctx.globalAlpha = 1;
 
         ctx.restore();
     }
 
     // ========== 暂停遮罩 ==========
     drawPauseOverlay() {
-        // 画面保持冻结可见，压暗与毛玻璃由 #pauseOverlay DOM 提供，
+        // 画面保持冻结可见，压暗由 #pauseOverlay DOM 的实色遮罩提供，
         // 避免画布与 DOM 两层遮罩叠加导致场景几乎全黑
     }
 

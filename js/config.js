@@ -135,7 +135,7 @@ const SPEED_STEP = 0.5;
 
 let noteSpeed = 16.0;
 let selectedDifficulty = 'normal+';
-let noteStyle = 'orb';   // 'pixel' | 'orb'
+let noteStyle = 'bar';   // 'bar'（扁平条）| 'pixel'（像素块）
 
 // 触控点显示开关（移动端游戏内显示手指触控圆环，设置页可切换）
 let touchFeedbackEnabled = true;

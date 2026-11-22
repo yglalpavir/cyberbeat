@@ -90,7 +90,7 @@ class LeaderboardManager {
             rank: record.rank || 'C',
             difficulty: record.difficulty || 'normal+',
             speed: record.speed || 16.0,
-            style: record.style || 'orb',
+            style: record.style || 'bar',
             isFailed: record.isFailed || false,
             performanceHistory: record.performanceHistory || []
         };
@@ -295,7 +295,7 @@ class LeaderboardManager {
                         rank: entry.rank || 'C',
                         difficulty: entry.difficulty || 'normal+',
                         speed: entry.speed || 16.0,
-                        style: entry.style || 'orb',
+                        style: entry.style || 'bar',
                         isFailed: entry.isFailed || false,
                         performanceHistory: entry.performanceHistory || []
                     };

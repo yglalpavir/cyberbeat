@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'cyberbeat_settings';
 const DEFAULT_SETTINGS = {
     noteSpeed: 16.0,
     volume: 4,
-    noteStyle: 'orb',
+    noteStyle: 'bar',
     difficulty: 'normal+',
     audioOffset: 0,
     touchFeedback: true
@@ -45,6 +45,10 @@ class SettingsStore {
             }
         } catch {
             this._settings = this._defaults();
+        }
+        // 旧存档迁移：原「球皮 orb」已改为扁平条 bar
+        if (this._settings.noteStyle === 'orb' || !this._settings.noteStyle) {
+            this._settings.noteStyle = 'bar';
         }
         return this._settings;
     }
