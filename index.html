@@ -24,6 +24,16 @@
     </button>
     <button id="skipIntroBtn" class="skip-intro-btn hidden" type="button">SKIP INTRO</button>
     <div id="rotateToast" class="rotate-toast hidden" role="status">↻ 已切换横竖屏，布局已自适应</div>
+    <div id="touchHint" class="touch-hint hidden">
+        <div class="touch-hint-card">
+            <div class="th-title">触屏操作指南</div>
+            <div class="th-row"><span class="th-icon">👆</span><span>点按屏幕任意位置或底部按键打击音符，<b>左右滑动可切换轨道</b></span></div>
+            <div class="th-row"><span class="th-icon">Ⅱ</span><span>右上角按钮暂停，暂停后恢复有 3 秒缓冲倒计时</span></div>
+            <div class="th-row"><span class="th-icon">⏭</span><span>长前奏曲目会出现 SKIP INTRO 按钮，点按可跳过</span></div>
+            <div class="th-row"><span class="th-icon">🎹</span><span>选曲页<b>双击歌曲</b>可跳过 START 直接进入设置</span></div>
+            <button class="btn btn-primary" id="touchHintClose" type="button">知道了</button>
+        </div>
+    </div>
     <div id="pauseOverlay" class="pause-overlay hidden">
         <div class="pause-card">
             <div class="pause-title">PAUSED</div>

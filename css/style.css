@@ -1860,6 +1860,93 @@ html.is-touch body.game-active .game-pause-btn {
     opacity: 1;
 }
 
+/* ===== 触屏操作指南（首次进入游戏时显示一次） ===== */
+.touch-hint {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(7, 7, 12, 0.78);
+    backdrop-filter: blur(8px);
+}
+
+.touch-hint.hidden {
+    display: none;
+}
+
+.touch-hint-card {
+    width: 100%;
+    max-width: 360px;
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    animation: fadeScale 0.25s ease;
+}
+
+.th-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-align: center;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.th-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.th-row b {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.th-icon {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(77, 171, 247, 0.12);
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+.touch-hint-card .btn {
+    margin-top: 6px;
+    flex-shrink: 0;
+}
+
+/* 横屏矮窗口紧凑化 */
+@media (orientation: landscape) and (max-height: 520px) {
+    .touch-hint-card {
+        max-width: 460px;
+        padding: 14px 18px;
+        gap: 8px;
+    }
+    .th-title { font-size: 0.9rem; }
+    .th-row { font-size: 0.7rem; }
+}
+
 /* 触屏设备游戏内：JS 移除 hidden 后真正显示跳过前奏按钮 */
 html.is-touch body.game-active .skip-intro-btn:not(.hidden) {
     display: block;

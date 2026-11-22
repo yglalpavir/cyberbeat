@@ -223,6 +223,16 @@ class UIManager {
             this._setupTouchSongListEnhancements();
         }
 
+        // 触屏操作指南（首次进入游戏时显示一次）
+        this.touchHint = document.getElementById('touchHint');
+        this.touchHintClose = document.getElementById('touchHintClose');
+        if (this.touchHintClose) {
+            this.touchHintClose.addEventListener('click', () => this._hideTouchHint(true));
+        }
+        let touchHintSeen = false;
+        try { touchHintSeen = !!localStorage.getItem('cyberbeat_touch_hint_seen'); } catch (e) { /* ignore */ }
+        this._pendingTouchHint = IS_TOUCH_DEVICE && !touchHintSeen;
+
         // 导入 MIDI 卡片点击 → 触发 file input
         this.importMidiCard.addEventListener('click', (e) => {
             if (e.target !== this.midiUpload) {
@@ -363,6 +373,9 @@ class UIManager {
                 }
 
                 if (!gameState.paused) {
+                    // 触屏指南打开时倒计时已冻结，后台切换无需处理
+                    if (gameState._initialCountdownFrozen) return;
+
                     const currentTime = performance.now() - gameState.startTime;
                     if (currentTime < 0) {
                         // 初始倒计时中切后台：冻结剩余倒计时（回到前台时重设），
@@ -382,6 +395,10 @@ class UIManager {
             } else {
                 // 回到前台
                 const inGame = gameState.screen === 'game';
+                // 触屏指南打开中：倒计时保持冻结，等指南关闭时统一恢复
+                if (inGame && this.touchHint && !this.touchHint.classList.contains('hidden')) {
+                    return;
+                }
                 // 初始倒计时被冻结：以剩余量重设倒计时与音乐调度
                 if (inGame && gameState._initialCountdownFrozen) {
                     const remaining = Math.max(0, gameState._initialCountdownRemaining || 0);
@@ -1780,8 +1797,46 @@ class UIManager {
         }
         this.updateInGameUI();
 
+        // 首次游玩：弹出触屏操作指南并冻结初始倒计时，关闭后继续
+        this._maybeShowTouchHint();
+        if (this.touchHint && !this.touchHint.classList.contains('hidden')) {
+            const remaining = Math.max(0, gameState.startTime - performance.now());
+            gameState._initialCountdownRemaining = remaining;
+            gameState._initialCountdownFrozen = true;
+            if (this._musicStartTimeout) {
+                clearTimeout(this._musicStartTimeout);
+                this._musicStartTimeout = null;
+                this._musicRestartDelay = Math.max(0, this._musicDelayMs - (performance.now() - this._musicScheduledAt));
+            }
+        }
+
         // 启动游戏循环
         requestAnimationFrame(gameLoop);
+    }
+
+    _hideTouchHint(markSeen) {
+        if (this.touchHint) {
+            this.touchHint.classList.add('hidden');
+        }
+        if (markSeen) {
+            try { localStorage.setItem('cyberbeat_touch_hint_seen', '1'); } catch (e) { /* ignore */ }
+        }
+        // 若初始倒计时因指南冻结，恢复倒计时与音乐调度
+        if (gameState._initialCountdownFrozen) {
+            const remaining = Math.max(0, gameState._initialCountdownRemaining || 0);
+            gameState._initialCountdownFrozen = false;
+            gameState._initialCountdownRemaining = 0;
+            gameState.startTime = performance.now() + remaining;
+            gameState.intervalStartTime = gameState.startTime;
+            this._musicDelayMs = remaining;
+            this._musicScheduledAt = performance.now();
+            if (this._musicStartTimeout) clearTimeout(this._musicStartTimeout);
+            this._musicStartTimeout = setTimeout(() => {
+                this._musicStartTimeout = null;
+                this._playGameMusic((getLoadedChartData()?.meta?.audioOffset) || 0);
+            }, remaining);
+            this._musicRestartDelay = 0;
+        }
     }
 
     /** 按当前加载的数据启动游戏音乐（供倒计时结束或暂停恢复时调用） */
@@ -2501,6 +2556,16 @@ class UIManager {
     /** 清除滑动换轨的手指轨道映射（暂停/重开时调用） */
     _clearCanvasTouchTracks() {
         if (this._canvasTouchTracks) this._canvasTouchTracks.clear();
+    }
+
+    // ========== 触屏操作指南 ==========
+    /** 首次进入游戏时显示触屏操作指南（点「知道了」后不再出现） */
+    _maybeShowTouchHint() {
+        if (!this._pendingTouchHint) return;
+        this._pendingTouchHint = false;
+        if (this.touchHint) {
+            this.touchHint.classList.remove('hidden');
+        }
     }
 
     /** 某轨道是否被其他手指按住（排除指定手指） */
