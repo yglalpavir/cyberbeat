@@ -299,11 +299,17 @@ class AudioEngine {
      * @param {Object} [opts]
      * @param {string} [opts.cacheKey] - 缓存键（如曲目 id）；命中时跳过下载与解码
      * @param {boolean} [opts.setCurrent=true] - 是否把结果设为当前待播曲目
+     * @param {(p: {phase: string, loaded: number, total: number, speed: number}) => void} [opts.onProgress]
+     *   进度回调：phase = 'start' | 'cache' | 'download' | 'decode' | 'done'
      * @returns {Promise<boolean>} 是否加载成功
      */
     async loadAudioFile(url, opts = {}) {
-        const { cacheKey = null, setCurrent = true } = opts;
+        const { cacheKey = null, setCurrent = true, onProgress = null } = opts;
         this.init();
+        const report = (phase, loaded = 0, total = 0, speed = 0) => {
+            if (!onProgress) return;
+            try { onProgress({ phase, loaded, total, speed }); } catch (e) { /* 回调异常不影响加载 */ }
+        };
 
         // 缓存命中：跳过 fetch + decodeAudioData（移动端解码 3MB ogg 可达数秒）
         if (cacheKey && this.hasCachedAudio(cacheKey)) {
@@ -311,13 +317,47 @@ class AudioEngine {
                 this.useCachedAudio(cacheKey);
                 this._currentAudioUrl = url;
             }
+            const buf = this.getCachedAudio(cacheKey);
+            report('cache', buf ? AudioEngine._bufferBytes(buf) : 0, buf ? AudioEngine._bufferBytes(buf) : 0, 0);
+            report('done', 0, 0, 0);
             return true;
         }
 
         try {
+            report('start', 0, 0, 0);
             const response = await fetch(url);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const arrayBuffer = await response.arrayBuffer();
+
+            const total = Number(response.headers.get('content-length')) || 0;
+            let arrayBuffer;
+
+            // 流式读取：能拿到实时的"已下载 / 总大小 / 速度"用于进度条
+            if (response.body && typeof response.body.getReader === 'function') {
+                const reader = response.body.getReader();
+                const chunks = [];
+                let received = 0;
+                const startedAt = performance.now();
+                for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    received += value.length;
+                    const seconds = Math.max(0.001, (performance.now() - startedAt) / 1000);
+                    report('download', received, total, received / seconds);
+                }
+                const merged = new Uint8Array(received);
+                let offset = 0;
+                for (const chunk of chunks) {
+                    merged.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                arrayBuffer = merged.buffer;
+            } else {
+                arrayBuffer = await response.arrayBuffer();
+                report('download', arrayBuffer.byteLength, total || arrayBuffer.byteLength, 0);
+            }
+
+            report('decode', arrayBuffer.byteLength, total || arrayBuffer.byteLength, 0);
             const buffer = await this.context.decodeAudioData(arrayBuffer);
 
             if (cacheKey) this._cacheBuffer(cacheKey, buffer);
@@ -327,6 +367,7 @@ class AudioEngine {
                 this._currentAudioUrl = url;
             }
             console.log('Audio file loaded:', url, `duration: ${buffer.duration.toFixed(1)}s`);
+            report('done', arrayBuffer.byteLength, total || arrayBuffer.byteLength, 0);
             return true;
         } catch (err) {
             console.error('Failed to load audio file:', url, err);
@@ -334,6 +375,7 @@ class AudioEngine {
                 this.audioBuffer = null;
                 this._currentAudioKey = null;
             }
+            report('error', 0, 0, 0);
             return false;
         }
     }

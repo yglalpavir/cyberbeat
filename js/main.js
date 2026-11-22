@@ -4,19 +4,73 @@ let renderer;
 let ui;
 let _lastFrameTime = 0;
 
+// ========== 启动加载遮罩 ==========
+const _boot = {
+    el: null,
+    fill: null,
+    text: null,
+    startedAt: 0,
+
+    init() {
+        this.el = document.getElementById('bootOverlay');
+        this.fill = document.getElementById('bootFill');
+        this.text = document.getElementById('bootText');
+        this.startedAt = performance.now();
+    },
+
+    /** 更新启动进度：text 文案，pct 0~1 */
+    step(text, pct) {
+        if (this.text && text) this.text.textContent = text;
+        if (this.fill && typeof pct === 'number') {
+            this.fill.style.width = Math.max(0, Math.min(1, pct)) * 100 + '%';
+        }
+    },
+
+    /** 完成并淡出（至少展示 350ms，避免闪一下） */
+    done() {
+        if (!this.el) return;
+        const wait = Math.max(0, 350 - (performance.now() - this.startedAt));
+        setTimeout(() => {
+            this.step('准备就绪', 1);
+            this.el.classList.add('hidden');
+        }, wait);
+    },
+
+    fail(message) {
+        this.step(message || '加载失败，请刷新重试', 1);
+        if (this.el) this.el.classList.add('boot-error');
+    }
+};
+
 async function init() {
+    _boot.init();
+    _boot.step('正在加载…', 0.05);
+
     // 加载配置
+    _boot.step('读取音频配置…', 0.2);
     await loadAudioConfig();
+    _boot.step('读取判定配置…', 0.4);
     await loadJudgeConfig();
 
     // 皮肤：按存档设置预加载（失败自动回退内置扁平皮肤）
+    _boot.step('载入皮肤…', 0.6);
     const skin = await initSkinFromSettings();
 
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     renderer = new Renderer(canvas, ctx);
     if (skin) renderer.setSkin(skin);
+    _boot.step('载入曲库…', 0.8);
     ui = new UIManager();
+
+    // 等曲库首次加载完成（最多 6 秒，超时也放行，列表内还有重试入口）
+    if (ui._libraryPromise) {
+        await Promise.race([
+            ui._libraryPromise,
+            new Promise((resolve) => setTimeout(resolve, 6000))
+        ]);
+    }
+    _boot.done();
 
     // 防止 canvas 被浏览器默认手势干扰
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -212,8 +266,13 @@ function gameLoop(timestamp) {
     requestAnimationFrame(gameLoop);
 }
 
+function onInitError(err) {
+    console.error('Init failed:', err);
+    _boot.fail('启动失败：' + ((err && err.message) || '未知错误'));
+}
+
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', () => init().catch(onInitError));
 } else {
-    init();
+    init().catch(onInitError);
 }

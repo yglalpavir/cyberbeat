@@ -18,16 +18,39 @@
 <body>
     <canvas id="gameCanvas"></canvas>
 
+    <!-- ==================== 启动加载遮罩 ==================== -->
+    <div id="bootOverlay" class="boot-overlay" role="status" aria-live="polite">
+        <div class="boot-card">
+            <h1 class="boot-logo">CYBER<span>BEAT</span></h1>
+            <div class="boot-track"><div class="boot-fill" id="bootFill"></div></div>
+            <div class="boot-text" id="bootText">正在加载…</div>
+        </div>
+    </div>
+
+    <!-- ==================== 拖拽导入提示 ==================== -->
+    <div id="dropHint" class="drop-hint hidden">
+        <div class="drop-hint-card">
+            <div class="drop-hint-icon">⤓</div>
+            <div class="drop-hint-title">松开导入谱面</div>
+            <div class="drop-hint-sub">支持 .mid / .osu / .osz</div>
+        </div>
+    </div>
+
     <!-- ==================== 游戏内触控 UI ==================== -->
     <button id="gamePauseBtn" class="game-pause-btn" type="button" aria-label="暂停游戏">
         <span aria-hidden="true">Ⅱ</span>
     </button>
     <button id="skipIntroBtn" class="skip-intro-btn hidden" type="button">SKIP INTRO</button>
     <div id="rotateToast" class="rotate-toast hidden" role="status">↻ 已切换横竖屏，布局已自适应</div>
-    <div id="importToast" class="import-toast hidden" role="status">
-        <span class="import-spinner" aria-hidden="true"></span>
-        <span id="importToastText">导入中…</span>
+    <div id="importToast" class="import-toast hidden" role="status" aria-live="polite">
+        <div class="toast-main">
+            <span class="import-spinner" aria-hidden="true"></span>
+            <span id="importToastText">导入中…</span>
+            <span id="importToastMeta" class="toast-meta"></span>
+        </div>
+        <div class="toast-track indeterminate" id="importToastTrack"><div class="toast-fill" id="importToastFill"></div></div>
     </div>
+    <div id="noticeToast" class="notice-toast hidden" role="status"></div>
     <div id="touchHint" class="touch-hint hidden">
         <div class="touch-hint-card">
             <div class="th-title">触屏操作指南</div>
@@ -168,6 +191,15 @@
                     <span class="ssi-title" id="settingsSongTitle">NO SONG</span>
                     <span class="ssi-artist" id="settingsSongArtist"></span>
                     <span class="ssi-meta" id="settingsSongMeta"></span>
+                </div>
+
+                <!-- 伴奏加载进度（下载百分比 / 已下载大小 / 速度） -->
+                <div class="audio-status hidden" id="audioStatus">
+                    <div class="audio-status-row">
+                        <span id="audioStatusText">伴奏加载中…</span>
+                        <span id="audioStatusMeta" class="audio-status-meta"></span>
+                    </div>
+                    <div class="toast-track" id="audioStatusTrack"><div class="toast-fill" id="audioStatusFill"></div></div>
                 </div>
 
                 <div class="settings-group" id="difficultyGroup">

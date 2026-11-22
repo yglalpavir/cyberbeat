@@ -39,7 +39,9 @@ class UIManager {
 
         this.cacheDOMElements();
         this.setupEventListeners();
-        this.loadSongLibrary();
+        this._setupDragAndDrop();
+        // 记录首屏曲库加载 promise，供启动遮罩等待
+        this._libraryPromise = this.loadSongLibrary();
         this.updateSpeedDisplay();
         this.updateStartButtons();
 
@@ -532,6 +534,8 @@ class UIManager {
 
     // ========== 曲库加载 ==========
     async loadSongLibrary() {
+        // 先铺骨架屏（首屏/重试时都能立刻看到"正在加载"而不是空列表）
+        this.renderSongList();
         try {
             const response = await fetch(CONFIG.songListUrl);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -560,6 +564,64 @@ class UIManager {
         this._libraryRetrying = false;
     }
 
+    /** 拖拽导入：把 .mid / .osu / .osz 拖进页面即可导入（仅选曲界面） */
+    _setupDragAndDrop() {
+        const hint = document.getElementById('dropHint');
+        const show = (on) => { if (hint) hint.classList.toggle('hidden', !on); };
+        const isFileDrag = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+        let depth = 0;
+
+        window.addEventListener('dragenter', (e) => {
+            if (!isFileDrag(e)) return;
+            e.preventDefault();
+            if (gameState.screen !== 'start') return;
+            depth++;
+            show(true);
+        });
+        window.addEventListener('dragover', (e) => {
+            if (!isFileDrag(e)) return;
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        });
+        window.addEventListener('dragleave', (e) => {
+            if (!isFileDrag(e)) return;
+            depth = Math.max(0, depth - 1);
+            if (depth === 0) show(false);
+        });
+        window.addEventListener('drop', (e) => {
+            if (!isFileDrag(e)) return;
+            e.preventDefault();
+            depth = 0;
+            show(false);
+            if (gameState.screen !== 'start') {
+                this._notice('请先回到选曲界面再拖入谱面', 'warn');
+                return;
+            }
+            const file = e.dataTransfer.files && e.dataTransfer.files[0];
+            if (!file) return;
+            this._importDroppedFile(file);
+        });
+    }
+
+    /** 按扩展名分发拖入的文件 */
+    _importDroppedFile(file) {
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (ext === 'mid' || ext === 'midi') return this._loadMidiFile(file);
+        if (ext === 'osu' || ext === 'osz') return this._importOsuOrOsz(file);
+        this._notice('不支持的文件类型，支持 .mid / .osu / .osz', 'warn');
+        return null;
+    }
+
+    /** 曲库加载中的骨架屏 */
+    _skeletonHtml() {
+        const row = `
+            <div class="song-skeleton" aria-hidden="true">
+                <span class="sk-icon"></span>
+                <span class="sk-lines"><i></i><i></i></span>
+            </div>`;
+        return row.repeat(3);
+    }
+
     /**
      * 判断是否为谱面类歌曲（.mc / .osu，谱面固定，不生成谱面）
      */
@@ -583,6 +645,17 @@ class UIManager {
 
     renderSongList() {
         if (!this.songCardsMidi || !this.songCardsSongs) return;
+
+        // 曲库还在加载：先给两个标签页铺骨架屏，避免空白列表
+        if (!this.songLibraryLoaded) {
+            const skeleton = this._skeletonHtml();
+            this.songCardsMidi.innerHTML = skeleton;
+            this.songCardsSongs.innerHTML = skeleton;
+            if (this.songEmptyMidi) this.songEmptyMidi.style.display = 'none';
+            if (this.songEmptySongs) this.songEmptySongs.style.display = 'none';
+            this.songCount.textContent = 'LOADING…';
+            return;
+        }
 
         const midiSongs = this._getMidiSongs();
         const chartSongs = this._getChartSongs();
@@ -944,48 +1017,51 @@ class UIManager {
 
     handleMidiImport(event) {
         const file = event.target.files[0];
+        event.target.value = '';   // 允许重新选择相同文件
         if (!file) return;
+        return this._loadMidiFile(file);
+    }
 
-        importedMidiFileName = file.name;
-        importedOsuFileName = null;
-        importedMcFileName = null;
+    /**
+     * 解析并载入本地 MIDI 文件（文件选择与拖拽共用）
+     * @param {File} file
+     */
+    async _loadMidiFile(file) {
+        this._showImportToast(`解析 ${file.name}`, { meta: this._formatBytes(file.size) });
+        await this._yieldToUI();
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const parser = new MidiParser(e.target.result);
-                loadedMidiData = parser.parse();
-                loadedMcData = null;
-                loadedOsuData = null;
+        try {
+            const buffer = await file.arrayBuffer();
+            const parser = new MidiParser(buffer);
+            loadedMidiData = parser.parse();
+            loadedMcData = null;
+            loadedOsuData = null;
 
-                selectedSongSource = 'import';
-                selectedLibrarySong = null;
-                // MIDI 走实时合成器：不再持有上一首的伴奏
-                this._gameAudioKey = null;
-                audioEngine.stopAudio();
-                // 根据导入的 MIDI 文件名生成 title（去掉扩展名）
-                selectedSongDisplayName = file.name.replace(/\.midi?$/i, '');
+            importedMidiFileName = file.name;
+            importedOsuFileName = null;
+            importedMcFileName = null;
 
-                this.updateSelectionDisplay();
-                this.updateAllHighlights();
-                this.updateStartButtons();
+            selectedSongSource = 'import';
+            selectedLibrarySong = null;
+            // MIDI 走实时合成器：不再持有上一首的伴奏
+            this._gameAudioKey = null;
+            audioEngine.stopAudio();
+            // 根据导入的 MIDI 文件名生成 title（去掉扩展名）
+            selectedSongDisplayName = file.name.replace(/\.midi?$/i, '');
 
-                event.target.value = ''; // 允许重新选择相同文件
-            } catch (err) {
-                console.error('MIDI parse error:', err);
-                alert('Failed to parse MIDI file.\nPlease ensure it is a valid Standard MIDI File.');
-                this.clearSelection();
-                event.target.value = '';
-            }
-        };
+            this.updateSelectionDisplay();
+            this.updateAllHighlights();
+            this.updateStartButtons();
 
-        reader.onerror = () => {
-            alert('Failed to read file.');
+            const noteCount = loadedMidiData && loadedMidiData.notes ? loadedMidiData.notes.length : 0;
+            this._notice(`已导入 ${selectedSongDisplayName}${noteCount ? '（' + noteCount + ' 音符）' : ''}`);
+        } catch (err) {
+            console.error('MIDI parse error:', err);
+            this._notice('MIDI 解析失败，请确认是标准 MIDI 文件', 'error', 4000);
             this.clearSelection();
-            event.target.value = '';
-        };
-
-        reader.readAsArrayBuffer(file);
+        } finally {
+            this._hideImportToast();
+        }
     }
 
     /**
@@ -997,19 +1073,24 @@ class UIManager {
     async handleOsuImport(event) {
         const file = event.target.files[0];
         if (!file) return;
+        event.target.value = '';   // 允许重新选择相同文件
+        return this._importOsuOrOsz(file);
+    }
 
+    /**
+     * 导入 .osu / .osz（文件选择与拖拽共用）
+     * @param {File} file
+     */
+    async _importOsuOrOsz(file) {
         // 防重复：上一次导入尚未完成时忽略本次
-        if (this._importBusy) {
-            event.target.value = '';
-            return;
-        }
+        if (this._importBusy) return;
         this._importBusy = true;
 
         const ext = file.name.split('.').pop().toLowerCase();
         const isOsz = ext === 'osz';
         try {
             if (isOsz) {
-                this._showImportToast(`解压 ${file.name}…`);
+                this._showImportToast(`读取 ${file.name}`, { meta: this._formatBytes(file.size) });
                 // 让出主线程，确保 toast 先渲染
                 await new Promise(r => setTimeout(r, 50));
             }
@@ -1018,25 +1099,108 @@ class UIManager {
             } else if (isOsz) {
                 await this._importOszFile(file);
             } else {
-                alert('Unsupported file type. Please select a .osu or .osz file.');
+                this._notice('不支持的文件类型，请选择 .osu / .osz', 'warn');
             }
         } catch (err) {
             console.error('osu! import error:', err);
-            alert(`Failed to import osu! beatmap.\n\n${err.message}`);
+            this._notice(`导入失败：${err.message.split('\n')[0]}`, 'error', 4000);
             this.clearSelection();
         } finally {
             this._importBusy = false;
             this._hideImportToast();
-            event.target.value = ''; // 允许重新选择相同文件
         }
     }
 
     /** 导入进度 toast */
-    _showImportToast(text) {
+    _showImportToast(text, opts = {}) {
         const toast = document.getElementById('importToast');
         if (!toast) return;
-        document.getElementById('importToastText').textContent = text;
+        this._updateImportToast({ text, ...opts });
         toast.classList.remove('hidden');
+    }
+
+    /**
+     * 更新导入进度
+     * @param {{text?: string, progress?: number|null, meta?: string, indeterminate?: boolean, error?: boolean}} opts
+     */
+    _updateImportToast(opts = {}) {
+        const textEl = document.getElementById('importToastText');
+        const metaEl = document.getElementById('importToastMeta');
+        const track = document.getElementById('importToastTrack');
+        const fill = document.getElementById('importToastFill');
+        if (opts.text !== undefined && textEl) textEl.textContent = opts.text;
+        if (opts.meta !== undefined && metaEl) metaEl.textContent = opts.meta;
+        if (!track || !fill) return;
+        track.classList.toggle('is-error', !!opts.error);
+        const hasProgress = typeof opts.progress === 'number' && Number.isFinite(opts.progress);
+        const indeterminate = opts.indeterminate !== undefined ? opts.indeterminate : !hasProgress;
+        track.classList.toggle('indeterminate', indeterminate);
+        if (hasProgress) {
+            fill.style.width = Math.max(0, Math.min(100, opts.progress * 100)).toFixed(1) + '%';
+        } else {
+            fill.style.width = '';
+        }
+    }
+
+    /** 轻提示：不阻塞操作的顶部小条 */
+    _notice(text, kind = 'info', duration = 2600) {
+        const el = document.getElementById('noticeToast');
+        if (!el) return;
+        el.textContent = text;
+        el.className = 'notice-toast ' + (kind === 'info' ? '' : kind);
+        el.classList.remove('hidden');
+        if (this._noticeTimer) clearTimeout(this._noticeTimer);
+        this._noticeTimer = setTimeout(() => {
+            el.classList.add('hidden');
+            this._noticeTimer = null;
+        }, duration);
+    }
+
+    /** 字节数 → 人类可读 */
+    _formatBytes(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    /** 字节/秒 → 人类可读 */
+    _formatSpeed(bytesPerSecond) {
+        if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '';
+        if (bytesPerSecond < 1024) return Math.round(bytesPerSecond) + ' B/s';
+        if (bytesPerSecond < 1048576) return (bytesPerSecond / 1024).toFixed(0) + ' KB/s';
+        return (bytesPerSecond / 1048576).toFixed(1) + ' MB/s';
+    }
+
+    /**
+     * 设置页伴奏状态条
+     * @param {'hidden'|'loading'|'ready'|'error'} state
+     * @param {{text?: string, meta?: string, progress?: number|null, indeterminate?: boolean}} [opts]
+     */
+    _setAudioStatus(state, opts = {}) {
+        const box = document.getElementById('audioStatus');
+        const textEl = document.getElementById('audioStatusText');
+        const metaEl = document.getElementById('audioStatusMeta');
+        const track = document.getElementById('audioStatusTrack');
+        const fill = document.getElementById('audioStatusFill');
+        if (!box) return;
+        if (state === 'hidden') {
+            box.classList.add('hidden');
+            return;
+        }
+        box.classList.remove('hidden');
+        box.dataset.state = state;
+        if (opts.text !== undefined && textEl) textEl.textContent = opts.text;
+        if (opts.meta !== undefined && metaEl) metaEl.textContent = opts.meta;
+        if (!track || !fill) return;
+        const hasProgress = typeof opts.progress === 'number' && Number.isFinite(opts.progress);
+        const indeterminate = opts.indeterminate !== undefined ? opts.indeterminate : !hasProgress;
+        track.classList.toggle('indeterminate', indeterminate);
+        if (hasProgress) {
+            fill.style.width = Math.max(0, Math.min(100, opts.progress * 100)).toFixed(1) + '%';
+        } else {
+            fill.style.width = state === 'ready' ? '100%' : '';
+        }
     }
 
     _hideImportToast() {
@@ -1080,7 +1244,7 @@ class UIManager {
      * 每解析一个条目让出主线程并更新进度，避免移动端 UI 冻结
      */
     async _importOszFile(file) {
-        this._showImportToast(`读取谱面包… (${(file.size / 1048576).toFixed(1)} MB)`);
+        this._showImportToast(`读取 ${file.name}`, { meta: this._formatBytes(file.size) });
         const arrayBuffer = await file.arrayBuffer();
         const zip = new OsZipReader(arrayBuffer);
         const osuEntries = zip.listOsuEntries();
@@ -1097,7 +1261,11 @@ class UIManager {
         ];
         for (let i = 0; i < allEntries.length; i++) {
             const cand = allEntries[i];
-            this._showImportToast(`解析谱面 ${i + 1}/${allEntries.length}…`);
+            this._updateImportToast({
+                text: `解析谱面 ${i + 1}/${allEntries.length}`,
+                progress: i / allEntries.length,
+                meta: cand.entry.name.split('/').pop()
+            });
             await this._yieldToUI();
             try {
                 const text = await zip.readText(cand.entry);
@@ -1124,9 +1292,13 @@ class UIManager {
         }
 
         // 难度计算（谱面多时较耗时，同样分批让出主线程）
-        this._showImportToast('计算难度…');
         for (let i = 0; i < candidates.length; i++) {
             const c = candidates[i];
+            this._updateImportToast({
+                text: `计算难度 ${i + 1}/${candidates.length}`,
+                progress: i / candidates.length,
+                meta: ''
+            });
             c.difficulty = new DifficultyCalculator(c.parsed.notes).calculate();
             if (i % 5 === 4) await this._yieldToUI();
         }
@@ -1226,18 +1398,22 @@ class UIManager {
             // 加载配套音频；找不到则停止旧音频（回退预设音乐）
             const audioEntry = c.audioEntry;
             if (audioEntry) {
-                this._loadOszAudio(zip, audioEntry).catch(err => {
+                this._loadOszAudio(zip, audioEntry).then((ok) => {
+                    this._notice(`已载入 ${selectedSongDisplayName}${ok === false ? '（伴奏加载失败）' : ''}`);
+                }).catch(err => {
                     console.warn('Failed to load osz audio:', err);
                     this._gameAudioKey = null;
                     audioEngine.stopAudio();
+                    this._notice(`已载入 ${selectedSongDisplayName}（伴奏加载失败）`, 'warn', 3600);
                 });
             } else {
                 this._gameAudioKey = null;
                 audioEngine.stopAudio();
+                this._notice(`已载入 ${selectedSongDisplayName}（无伴奏，使用内置节拍）`, 'warn', 3200);
             }
         } catch (err) {
             console.error('Apply osz candidate error:', err);
-            alert('Failed to apply beatmap.\n\n' + err.message);
+            this._notice(`载入谱面失败：${err.message.split('\n')[0]}`, 'error', 4000);
             this.clearSelection();
         }
     }
@@ -1335,7 +1511,7 @@ class UIManager {
     /** 从 .osz 中读取音频并送入音频引擎 */
     async _loadOszAudio(zip, audioEntry) {
         const audioName = audioEntry.name.split('/').pop();
-        this._showImportToast(`解码音频 ${audioName}…`);
+        this._showImportToast(`解码音频 ${audioName}`, { meta: this._formatBytes(audioEntry.size || 0) });
         try {
             const blob = await zip.readBlob(audioEntry);
             // 释放上一次导入的音频 URL
@@ -1346,8 +1522,25 @@ class UIManager {
             // 导入音频也走 key，重试 / 下一局还能按 key 取回，不会串到别的曲目
             const cacheKey = 'import:' + audioName + ':' + (this._importedOsuAudioUrl.slice(-36));
             this._gameAudioKey = cacheKey;
-            const ok = await audioEngine.loadAudioFile(this._importedOsuAudioUrl, { cacheKey, setCurrent: true });
+            const ok = await audioEngine.loadAudioFile(this._importedOsuAudioUrl, {
+                cacheKey,
+                setCurrent: true,
+                onProgress: (p) => {
+                    if (p.phase === 'decode') {
+                        this._updateImportToast({ text: `解码音频 ${audioName}`, indeterminate: true, meta: this._formatBytes(p.loaded) });
+                    } else if (p.phase === 'download') {
+                        const pct = p.total > 0 ? p.loaded / p.total : null;
+                        this._updateImportToast({
+                            text: `读取音频 ${audioName}`,
+                            progress: pct,
+                            indeterminate: pct === null,
+                            meta: this._formatBytes(p.loaded) + (p.total > 0 ? ' / ' + this._formatBytes(p.total) : '')
+                        });
+                    }
+                }
+            });
             if (!ok) this._gameAudioKey = null;
+            return ok;
         } finally {
             this._hideImportToast();
         }
@@ -1466,34 +1659,47 @@ class UIManager {
     // ========== 启动流程 ==========
     async handleStartOrConfig() {
         if (!selectedSongSource) return;
+        // 防连点：载入谱面是异步的，快速双击会重复请求并弹两次设置页
+        if (this._openingSettings) return;
+        this._openingSettings = true;
         this._stopPreview();   // 离开选曲页前停止歌曲试听
 
-        if (selectedSongSource === 'library' && selectedLibrarySong) {
-            // 谱面（.mc / .osu，几十 KB）与 MIDI（.mid，几十 KB）都很小，
-            // 同步加载以保证设置页元数据完整 / MIDI 谱面生成可用
-            if (selectedLibrarySong.beatmapType === 'mc') {
-                const mcLoaded = await this.loadLibraryMcBeatmap();
-                if (!mcLoaded) return;
-            } else if (selectedLibrarySong.beatmapType === 'osu') {
-                const osuLoaded = await this.loadLibraryOsuBeatmap();
-                if (!osuLoaded) return;
-            } else if (!loadedMidiData) {
-                const midiLoaded = await this.loadLibraryMidi();
-                if (!midiLoaded) return;   // MIDI 必须加载成功（谱面由它生成）
+        try {
+            if (selectedSongSource === 'library' && selectedLibrarySong) {
+                // 谱面（.mc / .osu，几十 KB）与 MIDI（.mid，几十 KB）都很小，
+                // 同步加载以保证设置页元数据完整 / MIDI 谱面生成可用；
+                // 弱网下可能要等几百毫秒，用 toast 告知"正在载入"，避免点击无反馈
+                this._showImportToast(`载入谱面 ${selectedLibrarySong.title}`, { indeterminate: true, meta: '' });
+                await this._yieldToUI();
+
+                if (selectedLibrarySong.beatmapType === 'mc') {
+                    const mcLoaded = await this.loadLibraryMcBeatmap();
+                    if (!mcLoaded) return;
+                } else if (selectedLibrarySong.beatmapType === 'osu') {
+                    const osuLoaded = await this.loadLibraryOsuBeatmap();
+                    if (!osuLoaded) return;
+                } else if (!loadedMidiData) {
+                    const midiLoaded = await this.loadLibraryMidi();
+                    if (!midiLoaded) return;   // MIDI 必须加载成功（谱面由它生成）
+                }
             }
-        }
 
-        if (!loadedMidiData && !getLoadedChartData()) {
-            alert('No beatmap data available. Please select a song or import a MIDI file.');
-            return;
-        }
+            if (!loadedMidiData && !getLoadedChartData()) {
+                this._notice('没有可用的谱面数据，请重新选择或导入', 'error', 3600);
+                return;
+            }
 
-        // 立即显示设置页——几 MB 的伴奏音频改为后台预加载，
-        // 避免移动端下载 + decodeAudioData 数秒的空白等待
-        this.showSettings();
+            // 立即显示设置页——几 MB 的伴奏音频改为后台预加载，
+            // 避免移动端下载 + decodeAudioData 数秒的空白等待
+            this.showSettings();
 
-        if (selectedSongSource === 'library' && selectedLibrarySong) {
-            this._preloadSongAudio(selectedLibrarySong);
+            // 设置页出现后立刻预载伴奏（进度显示在设置页的状态条里）
+            if (selectedSongSource === 'library' && selectedLibrarySong) {
+                this._preloadSongAudio(selectedLibrarySong);
+            }
+        } finally {
+            this._hideImportToast();
+            this._openingSettings = false;
         }
     }
 
@@ -1544,6 +1750,7 @@ class UIManager {
         if (audioEngine.useCachedAudio(cacheKey)) {
             this._pendingAudioReady = true;
             this._pendingAudioFailed = false;
+            this._setAudioStatus('ready', { text: '伴奏已就绪（缓存）', meta: '' });
             return;
         }
 
@@ -1552,17 +1759,64 @@ class UIManager {
 
         this._pendingAudioReady = false;
         this._pendingAudioFailed = false;
-        audioEngine.loadAudioFile(url, { cacheKey, setCurrent: false }).then(success => {
+        this._setAudioStatus('loading', { text: '伴奏加载中…', progress: null, meta: '0%' });
+        const startedAt = performance.now();
+        let lastPaint = 0;
+
+        audioEngine.loadAudioFile(url, {
+            cacheKey,
+            setCurrent: false,
+            onProgress: (p) => {
+                if (this._pendingAudioKey !== cacheKey) return;   // 已切歌，忽略旧进度
+                const now = performance.now();
+
+                if (p.phase === 'download') {
+                    // 进度条按 10Hz 刷新即可；未到刷新间隔直接丢弃本次采样
+                    if (now - lastPaint < 100) return;
+                    lastPaint = now;
+                    const pct = p.total > 0 ? p.loaded / p.total : null;
+                    const parts = [];
+                    if (pct !== null) parts.push(Math.round(pct * 100) + '%');
+                    parts.push(this._formatBytes(p.loaded) + (p.total > 0 ? ' / ' + this._formatBytes(p.total) : ''));
+                    const speed = this._formatSpeed(p.speed);
+                    if (speed) parts.push(speed);
+                    this._setAudioStatus('loading', {
+                        text: '伴奏下载中…',
+                        progress: pct,
+                        indeterminate: pct === null,
+                        meta: parts.join(' · ')
+                    });
+                } else if (p.phase === 'decode') {
+                    this._setAudioStatus('loading', {
+                        text: '伴奏解码中…',
+                        indeterminate: true,
+                        meta: this._formatBytes(p.loaded)
+                    });
+                }
+            }
+        }).then(success => {
             // 只在自己仍是"当前待加载曲目"时回写，避免旧请求覆盖新歌
             if (this._pendingAudioKey === cacheKey) {
                 this._pendingAudioReady = success;
                 this._pendingAudioFailed = !success;
-                if (success && this._gameAudioKey === cacheKey) audioEngine.useCachedAudio(cacheKey);
+                if (success && this._gameAudioKey === cacheKey) {
+                    audioEngine.useCachedAudio(cacheKey);
+                    const buf = audioEngine.audioBuffer;
+                    const elapsed = Math.max(0.001, (performance.now() - startedAt) / 1000);
+                    const size = buf ? buf.duration.toFixed(0) + 's' : '';
+                    this._setAudioStatus('ready', {
+                        text: '伴奏已就绪',
+                        meta: [size, '用时 ' + elapsed.toFixed(1) + 's'].filter(Boolean).join(' · ')
+                    });
+                } else if (!success) {
+                    this._setAudioStatus('error', { text: '伴奏加载失败，将使用内置节拍', meta: '' });
+                }
             }
         }).catch(() => {
             if (this._pendingAudioKey === cacheKey) {
                 this._pendingAudioReady = false;
                 this._pendingAudioFailed = true;
+                this._setAudioStatus('error', { text: '伴奏加载失败，将使用内置节拍', meta: '' });
             }
         });
     }
@@ -1624,7 +1878,7 @@ class UIManager {
                 return success;
             } catch (err) {
                 console.error('Failed to load audio file:', err);
-                alert(`Failed to load audio: ${song.title}\nPlease check that the audio file exists at:\n${filePath}`);
+                this._notice(`伴奏加载失败：${song.title}`, 'error', 4000);
                 return false;
             }
         }
@@ -1646,7 +1900,7 @@ class UIManager {
             return true;
         } catch (err) {
             console.error('Failed to load MIDI:', err);
-            alert(`Failed to load: ${song.title}\nPlease check that the MIDI file exists at:\n${filePath}`);
+            this._notice(`MIDI 文件加载失败：${song.title}`, 'error', 4000);
             return false;
         }
     }    // 保留旧方法名以兼容导入 MIDI 等其他调用处
@@ -1668,10 +1922,9 @@ class UIManager {
             // 校验 column
             const column = jsonData?.meta?.mode_ext?.column;
             if (column !== 4) {
-                alert(
-                    `Cannot load "${song.title}"\n\n` +
-                    `This beatmap is ${column}K, but CyberBeat only supports 4K beatmaps.\n` +
-                    `Please select a 4K chart.`
+                this._notice(
+                    `「${song.title}」是 ${column}K 谱面，本作仅支持 4K`,
+                    'error', 4200
                 );
                 return false;
             }
@@ -1696,11 +1949,7 @@ class UIManager {
             return true;
         } catch (err) {
             console.error('Failed to load MC beatmap:', err);
-            alert(
-                `Failed to load beatmap for: ${song.title}\n\n` +
-                `Error: ${err.message}\n\n` +
-                `Please check that the .mc file exists at:\n${filePath}`
-            );
+            this._notice(`「${song.title}」谱面加载失败：${err.message.split('\n')[0]}`, 'error', 4200);
             loadedMcData = null;
             return false;
         }
@@ -1747,11 +1996,7 @@ class UIManager {
             return true;
         } catch (err) {
             console.error('Failed to load osu! beatmap:', err);
-            alert(
-                `Failed to load beatmap for: ${song.title}\n\n` +
-                `Error: ${err.message}\n\n` +
-                `Please check that the .osu file exists at:\n${filePath}`
-            );
+            this._notice(`「${song.title}」谱面加载失败：${err.message.split('\n')[0]}`, 'error', 4200);
             loadedOsuData = null;
             return false;
         }
@@ -1759,6 +2004,9 @@ class UIManager {
 
     showSettings() {
         if (!selectedSongSource) return;
+
+        // 每次进入设置页先收起上一首的伴奏状态，等本曲预载回调再显示
+        this._setAudioStatus('hidden');
 
         // 更新设置面板的歌曲信息
         const importName = importedOsuFileName || importedMidiFileName;
@@ -1863,7 +2111,7 @@ class UIManager {
     // ========== 游戏开始 ==========
     async startGame() {
         if (!selectedSongSource) {
-            alert('Please select a song first.');
+            this._notice('请先选择一首歌曲', 'warn');
             return;
         }
         // 防重复点击：startGame 含异步等待，快速双击会启动两局
@@ -1884,12 +2132,12 @@ class UIManager {
         const isChartMode = !!chartData;
 
         if (!loadedMidiData && !isChartMode) {
-            alert('No beatmap data loaded. Please select a song or import a beatmap first.');
+            this._notice('没有可用的谱面数据，请先选择歌曲或导入谱面', 'error', 3600);
             return;
         }
 
         // 曲库歌曲：确保伴奏音频就绪（通常预加载已完成，此处最多短暂等待）。
-        // 等待期间按钮显示 LOADING；超时/失败回退预设音乐，不阻塞开始。
+        // 等待期间按钮显示 LOADING，并复用设置页的伴奏进度条（下载 % / 大小 / 速度）。
         if (selectedSongSource === 'library' && selectedLibrarySong) {
             const btn = this.settingsStartBtn;
             const originalText = btn ? btn.textContent : null;
@@ -1902,9 +2150,18 @@ class UIManager {
             const song = selectedLibrarySong;
             // MIDI 歌曲的谱面生成强依赖 loadedMidiData；预加载可能还在进行
             if (!this._isChartSong(song) && !loadedMidiData) showLoading(true);
+            if (this._isChartSong(song) && !audioEngine.hasCachedAudio(this._songAudioCacheKey(song))) {
+                showLoading(true);
+                // 进度由 _preloadSongAudio 的 onProgress 回调持续刷新；此时兜底文案
+                if (!this._pendingAudioFailed) {
+                    this._setAudioStatus('loading', { text: '等待伴奏…', indeterminate: true, meta: '' });
+                }
+            }
             const audioReady = await this._waitForSongAudio(song);
             if (!audioReady && this._isChartSong(song)) {
                 console.warn('Song audio not ready, falling back to preset music.');
+                this._setAudioStatus('error', { text: '伴奏未就绪，已回退内置节拍', meta: '' });
+                this._notice('伴奏未就绪，本局使用内置节拍', 'warn', 3000);
             }
             showLoading(false);
         }
@@ -2371,6 +2628,7 @@ class UIManager {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        this._notice('已导出本局成绩 JSON');
     }
 
     // ========== 设置变更 ==========
@@ -3604,6 +3862,7 @@ class UIManager {
         const jsonStr = leaderboard.exportAll();
         const now = new Date();
         leaderboard.downloadFile(jsonStr, `CyberBeat_Leaderboard_${now.getTime()}.json`);
+        this._notice('已导出全部成绩记录');
     }
 
     /** 导入排行榜数据 */
@@ -3616,20 +3875,20 @@ class UIManager {
             try {
                 const result = leaderboard.importData(e.target.result, 'merge');
                 if (result.success) {
-                    alert(result.message);
+                    this._notice(result.message);
                 } else {
-                    alert('Import failed: ' + result.message);
+                    this._notice('导入失败：' + result.message, 'error', 4000);
                 }
                 this._populateSongFilter();
                 this._renderLeaderboardList();
             } catch (err) {
-                alert('Import error: ' + err.message);
+                this._notice('导入出错：' + err.message, 'error', 4000);
             }
             event.target.value = '';
         };
 
         reader.onerror = () => {
-            alert('Failed to read file.');
+            this._notice('文件读取失败', 'error', 3600);
             event.target.value = '';
         };
 
