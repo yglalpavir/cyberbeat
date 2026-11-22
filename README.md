@@ -228,6 +228,22 @@ const SKIN_DRAW = {
 
 > **注意**：MC 谱面要求 `column=4`（4K 布局），不支持的谱面会报错提示。
 
+## 🔊 音频播放
+
+伴奏与结算音乐共用一套 Web Audio 输出，规则如下（`js/audio-engine.js` + `js/ui.js`）：
+
+- **按曲目 key 分槽缓存**：解码结果按 `song:<id>` / `import:<文件名>` / `result-audio:*` 分槽，命中必须 key 完全一致。
+  旧实现只有一个游戏槽位，切歌时"有缓存即命中"，会把上一首的伴奏播给下一首。
+- **单一音乐总线**：文件 / MIDI / 预设三种音乐都经 `musicGain → masterGain → limiter`，`stopMusic()` 断开总线即瞬间静音，
+  不会再有上一首的 source 或已排程的 MIDI 事件继续发声。
+- **开播前先静音**：`startAudioPlayback` / `startMidiMusic` / `startPresetMusic` 入口都会先 `_silenceMusic()`，
+  重复触发（暂停恢复、连点开始）不会叠音。
+- **每局只取本局伴奏**：`_startGameInner` 用 `_gameAudioKey` 从缓存取 buffer，取不到就回退预设音乐并打日志，
+  不会沿用上一首的 `audioBuffer`；结算音乐走自己的槽位，RETRY 时再切回本局伴奏。
+- **缓存上限**：默认 6 条 / 96MB LRU；「正在播放」「当前曲目」「最近写入」三种槽位不会被淘汰。
+  单个超大伴奏（例如 6 分钟曲目解码后约 141MB）也一定保留，否则预加载等于白做。
+- **预加载失败可判定**：拉取/解码失败会置 `_pendingAudioFailed`，开局立刻回退，不会白等 8 秒超时。
+
 ## ⚙️ 配置
 
 游戏参数通过外部 JSON 文件配置，修改后刷新页面即可生效：

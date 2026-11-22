@@ -26,6 +26,11 @@ class UIManager {
         this._skipIntroVisible = false;
         this._pauseOverlayVisible = false;
         this._wakeLock = null;
+        // 音频：当前歌曲的伴奏缓存 key / 预加载状态
+        this._gameAudioKey = null;      // 谱面歌曲 → 'song:<id>'；导入音频 → 'import:<...>'；MIDI → null
+        this._pendingAudioKey = null;
+        this._pendingAudioReady = null;
+        this._pendingAudioFailed = false;
 
         // 应用持久化设置到运行时变量
         if (typeof settingsStore !== 'undefined') {
@@ -831,10 +836,10 @@ class UIManager {
 
         // 停掉现有播放（含结算音乐残留），从缓存取解码结果循环播放
         audioEngine.stopMusic();
-        audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+        if (!audioEngine.useCachedAudio(cacheKey)) return;   // 缓存里没有就不播（避免串台）
         audioEngine.startAudioPlayback(0);
         this._previewLoop = true;
-        audioEngine.audioSource.loop = true;
+        if (audioEngine.audioSource) audioEngine.audioSource.loop = true;
         this._previewingSong = song;
     }
 
@@ -926,8 +931,11 @@ class UIManager {
         // 切歌：清掉上一首的待播音频引用与预加载状态，
         // 防止尚未完成的旧预加载把旧伴奏写进新歌的播放
         audioEngine.audioBuffer = null;
+        audioEngine.stopAudio();                    // 停掉可能还在播的上一条音源
         this._pendingAudioReady = null;
         this._pendingAudioKey = null;
+        // 本局应使用的伴奏缓存 key（谱面歌曲才有；MIDI 歌曲走合成器）
+        this._gameAudioKey = this._isChartSong(song) ? this._songAudioCacheKey(song) : null;
 
         this.updateSelectionDisplay();
         this.updateAllHighlights();
@@ -952,6 +960,9 @@ class UIManager {
 
                 selectedSongSource = 'import';
                 selectedLibrarySong = null;
+                // MIDI 走实时合成器：不再持有上一首的伴奏
+                this._gameAudioKey = null;
+                audioEngine.stopAudio();
                 // 根据导入的 MIDI 文件名生成 title（去掉扩展名）
                 selectedSongDisplayName = file.name.replace(/\.midi?$/i, '');
 
@@ -1050,6 +1061,7 @@ class UIManager {
                     const result = parser.parse();
                     this._applyImportedOsu(result, file.name);
                     // 无音频：清空残留的音频缓冲，回退到预设音乐
+                    this._gameAudioKey = null;
                     audioEngine.stopAudio();
                     resolve();
                 } catch (err) {
@@ -1216,9 +1228,11 @@ class UIManager {
             if (audioEntry) {
                 this._loadOszAudio(zip, audioEntry).catch(err => {
                     console.warn('Failed to load osz audio:', err);
+                    this._gameAudioKey = null;
                     audioEngine.stopAudio();
                 });
             } else {
+                this._gameAudioKey = null;
                 audioEngine.stopAudio();
             }
         } catch (err) {
@@ -1329,7 +1343,11 @@ class UIManager {
                 URL.revokeObjectURL(this._importedOsuAudioUrl);
             }
             this._importedOsuAudioUrl = URL.createObjectURL(blob);
-            await audioEngine.loadAudioFile(this._importedOsuAudioUrl);
+            // 导入音频也走 key，重试 / 下一局还能按 key 取回，不会串到别的曲目
+            const cacheKey = 'import:' + audioName + ':' + (this._importedOsuAudioUrl.slice(-36));
+            this._gameAudioKey = cacheKey;
+            const ok = await audioEngine.loadAudioFile(this._importedOsuAudioUrl, { cacheKey, setCurrent: true });
+            if (!ok) this._gameAudioKey = null;
         } finally {
             this._hideImportToast();
         }
@@ -1361,6 +1379,7 @@ class UIManager {
      * 应用导入的 Malody .mc 谱面到全局状态
      */
     _applyImportedMc(parsed, displayName) {
+        this._gameAudioKey = null;   // 音频稍后由 _loadOszAudio 写入
         loadedOsuData = null;
         loadedMcData = parsed;
         loadedMidiData = null;
@@ -1392,7 +1411,8 @@ class UIManager {
         selectedSongDisplayName = null;
 
         // 同步清空待播音频引用与预加载状态
-        audioEngine.audioBuffer = null;
+        audioEngine.stopAudio();
+        this._gameAudioKey = null;
         this._pendingAudioReady = null;
         this._pendingAudioKey = null;
 
@@ -1521,9 +1541,9 @@ class UIManager {
         }
 
         // 谱面歌曲：已缓存 → 直接恢复为当前待播曲目，无需网络
-        if (audioEngine.hasCachedAudio(cacheKey)) {
-            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+        if (audioEngine.useCachedAudio(cacheKey)) {
             this._pendingAudioReady = true;
+            this._pendingAudioFailed = false;
             return;
         }
 
@@ -1531,15 +1551,19 @@ class UIManager {
         if (!url) return;
 
         this._pendingAudioReady = false;
+        this._pendingAudioFailed = false;
         audioEngine.loadAudioFile(url, { cacheKey, setCurrent: false }).then(success => {
+            // 只在自己仍是"当前待加载曲目"时回写，避免旧请求覆盖新歌
             if (this._pendingAudioKey === cacheKey) {
                 this._pendingAudioReady = success;
-                if (success) {
-                    audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
-                }
+                this._pendingAudioFailed = !success;
+                if (success && this._gameAudioKey === cacheKey) audioEngine.useCachedAudio(cacheKey);
             }
         }).catch(() => {
-            if (this._pendingAudioKey === cacheKey) this._pendingAudioReady = false;
+            if (this._pendingAudioKey === cacheKey) {
+                this._pendingAudioReady = false;
+                this._pendingAudioFailed = true;
+            }
         });
     }
 
@@ -1560,23 +1584,21 @@ class UIManager {
         }
 
         // 已缓存：直接恢复
-        if (audioEngine.hasCachedAudio(cacheKey)) {
-            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+        if (audioEngine.useCachedAudio(cacheKey)) {
             return true;
         }
 
         // 等预加载完成（最多 8s，超时回退预设音乐）
         const deadline = performance.now() + 8000;
         while (performance.now() < deadline) {
-            if (audioEngine.hasCachedAudio(cacheKey)) {
-                audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+            if (audioEngine.useCachedAudio(cacheKey)) {
                 return true;
             }
-            if (this._pendingAudioKey !== cacheKey) break;   // 已切歌
-            if (this._pendingAudioReady === false && audioEngine.audioBuffer) break;
+            if (this._pendingAudioKey !== cacheKey) break;          // 已切歌
+            if (this._pendingAudioFailed && this._pendingAudioKey === cacheKey) break;   // 预加载失败
             await new Promise(r => setTimeout(r, 100));
         }
-        return audioEngine.hasCachedAudio(cacheKey);
+        return audioEngine.useCachedAudio(cacheKey);
     }
 
     /**
@@ -1895,6 +1917,18 @@ class UIManager {
             this._musicStartTimeout = null;
         }
 
+        // 本局伴奏：只允许"当前这首歌"的解码结果进入播放，避免串到上一首。
+        // 放在预加载结算音乐之前，让当前伴奏先成为缓存中的"在用槽位"，不会被挤掉。
+        // （`_gameAudioKey` 在选歌/导入时确定；MIDI 歌曲为 null，走合成器）
+        if (this._gameAudioKey) {
+            if (!audioEngine.useCachedAudio(this._gameAudioKey)) {
+                console.warn('[audio] 伴奏未就绪，回退预设音乐：', this._gameAudioKey);
+                audioEngine.audioBuffer = null;
+            }
+        } else {
+            audioEngine.audioBuffer = null;
+        }
+
         // 进入游戏态：显示触控轨道与游戏内按钮
         document.body.classList.add('game-active');
         this._setPauseOverlayVisible(false);
@@ -1951,15 +1985,6 @@ class UIManager {
 
         // 重置渲染器对象池
         if (renderer) renderer.resetPools();
-
-        // 重试/重开前：确保解码缓存中的伴奏恢复为当前待播曲目
-        // （stopMusic 只解除 audioBuffer 引用，缓存里还有解码结果，无需重新下载）
-        if (selectedSongSource === 'library' && selectedLibrarySong && this._isChartSong(selectedLibrarySong)) {
-            const cacheKey = this._songAudioCacheKey(selectedLibrarySong);
-            if (audioEngine.hasCachedAudio(cacheKey)) {
-                audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
-            }
-        }
 
         // 设置未来时间实现倒计时（谱面时间从倒计时结束时开始计算）
         // 全局偏移：正值使音符更晚到达判定线，负值反之
@@ -2183,16 +2208,15 @@ class UIManager {
             : 'assets/result-audio/completed.mp3';
         const cacheKey = 'result-audio:' + (isFailed ? 'failed' : 'completed');
 
-        if (audioEngine.hasCachedAudio(cacheKey)) {
-            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+        // 结算音乐走自己的缓存槽；不触碰当前歌曲的伴奏引用
+        if (audioEngine.useCachedAudio(cacheKey)) {
             audioEngine.startAudioPlayback(0);
             return;
         }
 
         // 现场加载（首次游玩未预载完成的情形）
         const loaded = await audioEngine.loadAudioFile(audioPath, { cacheKey });
-        if (loaded) {
-            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+        if (loaded && audioEngine.useCachedAudio(cacheKey)) {
             audioEngine.startAudioPlayback(0);
         }
     }
