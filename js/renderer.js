@@ -868,10 +868,16 @@ class Renderer {
         this._touchPoints.set(id, { x, y, track, phase: 'down', age: 0 });
     }
 
-    /** 手指移动：更新触控点位置（滑动切换轨道时跟随） */
-    moveTouchPoint(id, x, y) {
+    /** 手指移动：更新触控点位置，跨轨滑动时圆环颜色随新轨道变化 */
+    moveTouchPoint(id, x, y, track) {
         const p = this._touchPoints.get(id);
-        if (p) { p.x = x; p.y = y; }
+        if (!p) return;
+        p.x = x;
+        p.y = y;
+        if (track !== undefined && track !== p.track) {
+            p.track = track;
+            p.age = 0;   // 换轨重置呼吸相位，颜色切换更醒目
+        }
     }
 
     /** 手指松开：圆环消失，留下扩散涟漪 */
