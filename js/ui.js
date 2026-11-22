@@ -21,6 +21,12 @@ class UIManager {
         // 空格双击检测（跳过前奏）
         this._lastSpaceDownAt = 0;
 
+        // 移动端 / 游戏内 UI 状态
+        this._isTouchDevice = typeof IS_TOUCH_DEVICE !== 'undefined' ? IS_TOUCH_DEVICE : false;
+        this._skipIntroVisible = false;
+        this._pauseOverlayVisible = false;
+        this._wakeLock = null;
+
         // 应用持久化设置到运行时变量
         if (typeof settingsStore !== 'undefined') {
             settingsStore.applyToRuntime();
@@ -134,6 +140,14 @@ class UIManager {
         this.oszPicker       = document.getElementById('oszPicker');
         this.oszPickerList   = document.getElementById('oszPickerList');
         this.oszPickerCancel = document.getElementById('oszPickerCancel');
+
+        // 游戏内触控 UI
+        this.gamePauseBtn    = document.getElementById('gamePauseBtn');
+        this.skipIntroBtn    = document.getElementById('skipIntroBtn');
+        this.pauseOverlay    = document.getElementById('pauseOverlay');
+        this.pauseResumeBtn  = document.getElementById('pauseResumeBtn');
+        this.pauseRetryBtn   = document.getElementById('pauseRetryBtn');
+        this.pauseHomeBtn    = document.getElementById('pauseHomeBtn');
     }
 
     // ========== 事件绑定 ==========
@@ -248,14 +262,141 @@ class UIManager {
             });
         }
 
+        // 游戏内触控 UI
+        if (this.gamePauseBtn) {
+            this.gamePauseBtn.addEventListener('click', () => this.togglePause());
+            // 触屏设备：连点 5 次（500ms 内）切换性能监控面板
+            this._perfTapCount = 0;
+            this._perfTapTimer = null;
+            this.gamePauseBtn.addEventListener('pointerdown', () => {
+                if (!IS_TOUCH_DEVICE) return;
+                this._perfTapCount++;
+                clearTimeout(this._perfTapTimer);
+                this._perfTapTimer = setTimeout(() => { this._perfTapCount = 0; }, 500);
+                if (this._perfTapCount >= 5) {
+                    this._perfTapCount = 0;
+                    perfMonitor.toggle();
+                }
+            });
+        }
+        if (this.skipIntroBtn) {
+            this.skipIntroBtn.addEventListener('click', () => this.skipIntro());
+        }
+        if (this.pauseResumeBtn) {
+            this.pauseResumeBtn.addEventListener('click', () => this.togglePause());
+        }
+        if (this.pauseRetryBtn) {
+            this.pauseRetryBtn.addEventListener('click', () => this.retryGame());
+        }
+        if (this.pauseHomeBtn) {
+            this.pauseHomeBtn.addEventListener('click', () => this.goToHome());
+        }
+
         // 键盘
         this.setupKeyboardControls();
 
         // 移动端
         this.setupMobileControls();
 
+        // 首次用户手势解锁音频（iOS 静音策略）
+        this._setupAudioUnlock();
+
+        // 切到后台自动暂停 + 唤醒锁
+        this._setupVisibilityHandling();
+
         // 禁止右键菜单
         document.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
+    // ========== 音频解锁 ==========
+    _setupAudioUnlock() {
+        const unlock = () => {
+            if (typeof audioEngine !== 'undefined' && audioEngine.unlock) {
+                audioEngine.unlock();
+            }
+        };
+        ['pointerdown', 'touchstart', 'keydown', 'click'].forEach((evt) => {
+            document.addEventListener(evt, unlock, { once: true, passive: true });
+        });
+    }
+
+    // ========== 页面可见性 / 唤醒锁 ==========
+    _setupVisibilityHandling() {
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (gameState.screen === 'game' && !gameState.paused) {
+                    const currentTime = performance.now() - gameState.startTime;
+                    if (currentTime >= 0) this.togglePause();
+                }
+            } else if (gameState.screen === 'game' && !gameState.paused) {
+                this._requestWakeLock();
+            }
+        });
+    }
+
+    async _requestWakeLock() {
+        if (!('wakeLock' in navigator) || document.hidden) return;
+        try {
+            if (this._wakeLock) return;
+            this._wakeLock = await navigator.wakeLock.request('screen');
+            this._wakeLock.addEventListener('release', () => {
+                this._wakeLock = null;
+            });
+        } catch (err) {
+            this._wakeLock = null;
+        }
+    }
+
+    _releaseWakeLock() {
+        if (this._wakeLock) {
+            try { this._wakeLock.release(); } catch (err) { /* ignore */ }
+            this._wakeLock = null;
+        }
+    }
+
+    // ========== 游戏内 UI 状态 ==========
+    /** 每帧调用，按需显示/隐藏跳过前奏按钮与暂停按钮 */
+    updateInGameUI() {
+        const inGame = gameState.screen === 'game';
+        if (this.gamePauseBtn) {
+            this.gamePauseBtn.classList.toggle('hidden', !inGame || gameState.paused);
+        }
+        if (!inGame || gameState.paused) {
+            this.setSkipIntroVisible(false);
+            return;
+        }
+        this.setSkipIntroVisible(this._canSkipIntro());
+    }
+
+    _canSkipIntro() {
+        if (gameState.screen !== 'game' || gameState.paused) return false;
+        if (!audioEngine.isPlaying || audioEngine._paused) return false;
+
+        const sceneTime = performance.now() - gameState.startTime;
+        if (sceneTime < 0 || sceneTime > 10000) return false;
+
+        const firstNoteTime = this._getFirstNoteTime();
+        if (firstNoteTime === null) return false;
+        return sceneTime < firstNoteTime - 5000;
+    }
+
+    setSkipIntroVisible(visible) {
+        if (!this.skipIntroBtn || this._skipIntroVisible === visible) return;
+        this._skipIntroVisible = visible;
+        this.skipIntroBtn.classList.toggle('hidden', !visible);
+    }
+
+    _setPauseOverlayVisible(visible) {
+        this._pauseOverlayVisible = visible;
+        if (this.pauseOverlay) {
+            this.pauseOverlay.classList.toggle('hidden', !visible);
+        }
+        if (visible) {
+            this.setSkipIntroVisible(false);
+        }
+        if (this.gamePauseBtn) {
+            this.gamePauseBtn.classList.toggle('hidden', visible || gameState.screen !== 'game');
+        }
     }
 
     // ========== 曲库加载 ==========
@@ -1282,15 +1423,23 @@ class UIManager {
 
         // 停止一切残留播放（结算音乐/上一局音乐），并清掉可能挂起的启动定时器
         audioEngine.stopMusic();
+        if (audioEngine.unlock) audioEngine.unlock();
         if (this._musicStartTimeout) {
             clearTimeout(this._musicStartTimeout);
             this._musicStartTimeout = null;
         }
 
+        // 进入游戏态：显示触控轨道与游戏内按钮
+        document.body.classList.add('game-active');
+        this._setPauseOverlayVisible(false);
+        this.setSkipIntroVisible(false);
+        this._requestWakeLock();
+
         // 隐藏所有 UI
         this.startScreen.classList.add('hidden');
         this.settingsScreen.classList.add('hidden');
         this.resultScreen.classList.add('hidden');
+        if (this.leaderboardScreen) this.leaderboardScreen.classList.add('hidden');
 
         // 生成谱面：优先使用谱面（.mc / .osu），否则用 MIDI 算法生成
         // 谱面音符深拷贝：清除上一局的 hit/missed/holdActive 等运行时状态，保证 RETRY 正确
@@ -1347,6 +1496,7 @@ class UIManager {
         if (renderer) {
             renderer.resize();
         }
+        this.updateInGameUI();
 
         // 启动游戏循环
         requestAnimationFrame(gameLoop);
@@ -1368,6 +1518,10 @@ class UIManager {
         gameState.screen = 'result';
         gameState.isPlaying = false;
         gameState.paused = false;
+        document.body.classList.remove('game-active');
+        this._setPauseOverlayVisible(false);
+        this.setSkipIntroVisible(false);
+        this._releaseWakeLock();
         // 清除可能挂起的启动音乐定时器（防止结算后音乐再响起）
         if (this._musicStartTimeout) {
             clearTimeout(this._musicStartTimeout);
@@ -1508,6 +1662,11 @@ class UIManager {
     goToHome() {
         // 停止所有音频
         audioEngine.stopMusic();
+        // 退出游戏态 UI
+        document.body.classList.remove('game-active');
+        this._setPauseOverlayVisible(false);
+        this.setSkipIntroVisible(false);
+        this._releaseWakeLock();
         // 重置游戏状态
         gameState.reset();
         // 重置渲染器对象池
@@ -1785,6 +1944,7 @@ class UIManager {
         gameState.startTime = now - target;               // 直接重定位场景时间轴起点
         gameState.intervalStartTime -= delta;             // 保持与 startTime 的相对偏移不变
         audioEngine.seekMusic(target);
+        this.setSkipIntroVisible(false);
         console.log(`Skipped intro: jumped ${delta.toFixed(0)}ms to T+${target.toFixed(0)}ms`);
     }
 
@@ -1814,6 +1974,7 @@ class UIManager {
             gameState.intervalStartTime += pauseDuration;
             gameState.paused = false;
             audioEngine.resumeMusic();
+            this._setPauseOverlayVisible(false);
 
             // 若音乐启动定时器挂起中，按剩余延迟重新调度
             if (this._musicRestartDelay > 0 && this._musicDelayMs > 0) {
@@ -1842,50 +2003,72 @@ class UIManager {
             }
 
             audioEngine.pauseMusic();
+            this._setPauseOverlayVisible(true);
         }
     }
 
-    // ========== 移动端控制 (增强版) ==========
+    // ========== 移动端控制 (多点触控增强版) ==========
     setupMobileControls() {
-        // 检测是否为触屏设备
-        this._isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        // 使用全局设备检测（避免触屏笔记本被误判）
+        this._isTouchDevice = typeof IS_TOUCH_DEVICE !== 'undefined' ? IS_TOUCH_DEVICE : false;
 
-        // HTML 按钮绑定
+        // HTML 按钮绑定（pointer events 支持多指，每根手指独立 capture）
         const mobileBtns = document.querySelectorAll('.mobile-btn');
         mobileBtns.forEach((btn, index) => {
-            // pointerdown/pointerup 同时支持触摸和鼠标
-            btn.addEventListener('pointerdown', (e) => {
+            const key = KEYS[index];
+
+            const press = (e) => {
+                if (gameState.screen !== 'game' || gameState.paused) return;
                 e.preventDefault();
+                try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+                if (gameState.pressedKeys.has(key)) return;
                 btn.classList.add('active');
-                gameState.pressedKeys.add(KEYS[index]);
+                gameState.pressedKeys.add(key);
+                this.checkHit(index);
+            };
 
-                if (gameState.screen === 'game' && !gameState.paused) {
-                    this.checkHit(index);
-                }
-            });
-
-            btn.addEventListener('pointerup', (e) => {
-                e.preventDefault();
+            const release = (e) => {
+                if (e) e.preventDefault();
                 btn.classList.remove('active');
-                if (gameState.screen === 'game' && !gameState.paused) {
+                if (gameState.screen === 'game' && !gameState.paused && gameState.pressedKeys.has(key)) {
                     this.checkHoldRelease(index);
                 }
-                gameState.pressedKeys.delete(KEYS[index]);
-            });
+                gameState.pressedKeys.delete(key);
+            };
 
+            // pointerdown/pointerup 同时支持触摸和鼠标（多指各自独立触发）
+            btn.addEventListener('pointerdown', press);
+            btn.addEventListener('pointerup', release);
+            btn.addEventListener('pointercancel', release);
             btn.addEventListener('pointerleave', (e) => {
-                btn.classList.remove('active');
-                if (gameState.screen === 'game' && !gameState.paused) {
-                    this.checkHoldRelease(index);
-                }
-                gameState.pressedKeys.delete(KEYS[index]);
+                // 鼠标移出时释放；触摸由 pointer capture 处理
+                if (e.pointerType === 'mouse') release(e);
             });
 
-            // 防止双击缩放
+            // 防止双击缩放 / 长按选择
             btn.addEventListener('dblclick', (e) => e.preventDefault());
+            btn.addEventListener('contextmenu', (e) => e.preventDefault());
         });
 
-        // Canvas 区域触控 (直接点击轨道)
+        // 仅触屏设备启用游戏内手势拦截（桌面端无需）
+        if (this._isTouchDevice) {
+            // 阻止 iOS Safari 双指捏合缩放游戏画面
+            document.addEventListener('gesturestart', (e) => {
+                if (gameState.screen === 'game') e.preventDefault();
+            }, { passive: false });
+
+            // 双指/多指同时触屏时阻止整页滚动缩放
+            document.addEventListener('touchmove', (e) => {
+                if (gameState.screen === 'game' && e.touches.length > 0) {
+                    // 只阻止游戏画布与触控键区域的滚动，不阻塞面板内部滚动
+                    const t = e.target;
+                    const inScrollable = t.closest && t.closest('.settings-card, .lb-list-wrapper, .song-list-wrapper, .result-card, .osz-picker-list, .lb-card');
+                    if (!inScrollable) e.preventDefault();
+                }
+            }, { passive: false });
+        }
+
+        // Canvas 区域触控（整屏映射：触点 X 均分 4 轨，降低误触）
         const canvas = document.getElementById('gameCanvas');
         if (canvas) {
             canvas.addEventListener('touchstart', (e) => {
@@ -1913,21 +2096,19 @@ class UIManager {
         }
     }
 
-    /** 处理 Canvas 上的触控，映射到轨道 */
+    /** 处理 Canvas 上的触控，映射到轨道（全屏均分映射，边缘外扩容错） */
     _handleCanvasTouch(clientX, clientY, isDown) {
         if (!renderer) return;
-        const totalWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * CONFIG.trackSpacing;
-        const startX = renderer.trackStartX;
-        const endX = startX + totalWidth;
 
-        // 在轨道区域外 → 忽略
-        if (clientX < startX - 20 || clientX > endX + 20) return;
+        // 触点落在底部触控键区域（约底部 100px）→ 忽略，避免与 DOM 按钮重复触发
+        if (clientY > renderer.canvasHeight - 110) return;
 
-        // 计算轨道索引
-        const relX = clientX - startX;
-        const trackWidth = CONFIG.trackWidth + CONFIG.trackSpacing;
-        const trackIndex = Math.floor(relX / trackWidth);
-        if (trackIndex < 0 || trackIndex >= CONFIG.trackCount) return;
+        // 全屏均分映射：无论轨道实际渲染宽度如何，屏幕 X 平均分为 4 轨。
+        // 优势：手指不需要瞄准细轨道，拇指自然分列左右即可覆盖全部轨道。
+        const trackIndex = Math.min(
+            CONFIG.trackCount - 1,
+            Math.max(0, Math.floor((clientX / renderer.canvasWidth) * CONFIG.trackCount))
+        );
 
         const key = KEYS[trackIndex];
 
@@ -1945,7 +2126,8 @@ class UIManager {
         if (!renderer) return false;
         if (gameState.paused) return false;
 
-        const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
+        // 使用渲染器实际绘制的判定线位置（移动端已为触控键上移）
+        const judgmentY = renderer._judgmentY;
         const currentTime = performance.now() - gameState.startTime;
 
         if (currentTime < 0) return false;
@@ -2689,7 +2871,7 @@ class UIManager {
                     gameState.combo = 0;
                     gameState.health = Math.max(0, gameState.health - CONFIG.health.lossOnMiss);
 
-                    const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
+                    const judgmentY = renderer._judgmentY;
                     renderer.addJudgment('MISS', judgmentY, track);
                     audioEngine.playHitSound('miss');
                     continue;
@@ -2704,7 +2886,6 @@ class UIManager {
 
                 gameState.health = Math.min(CONFIG.health.initial, gameState.health + 1);
 
-                const judgmentY = renderer.canvasHeight * CONFIG.judgmentLineY;
                 renderer.createLaser(track);
             }
         }

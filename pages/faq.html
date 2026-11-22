@@ -2,8 +2,11 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0b0b12">
     <title>CyberBeat Pixel — 判定与记分说明</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
     <link rel="stylesheet" href="../css/style.css">
     <style>
         body {
@@ -53,12 +56,15 @@
             align-items: center;
             gap: 6px;
             margin-top: 20px;
+            padding: 8px 14px;
+            border: 1px solid var(--border-medium);
+            border-radius: var(--radius-sm);
             color: var(--accent);
             text-decoration: none;
             font-size: 0.85rem;
             font-weight: 600;
             letter-spacing: 0.5px;
-            transition: color var(--transition-fast);
+            transition: color var(--transition-fast), border-color var(--transition-fast);
         }
         .faq-back:hover {
             color: var(--accent-strong);
@@ -266,12 +272,25 @@
         /* 响应式 */
         @media (max-width: 600px) {
             .faq-container {
-                padding: 24px 16px 48px;
+                padding: calc(env(safe-area-inset-top, 0px) + 24px) 16px calc(env(safe-area-inset-bottom, 0px) + 48px);
             }
             .faq-header h1 { font-size: 1.5rem; }
+            .faq-header { margin-bottom: 32px; padding-bottom: 20px; }
             .faq-section h2 { font-size: 1.05rem; }
             .faq-table { font-size: 0.78rem; }
             .faq-table thead th, .faq-table tbody td { padding: 8px 10px; }
+            .formula-block { font-size: 0.78rem; padding: 12px 14px; }
+            .faq-back {
+                display: inline-block;
+                padding: 10px 18px;
+                min-height: 44px;
+            }
+        }
+
+        /* 小屏横屏：缩小头部留白 */
+        @media (max-width: 600px) and (orientation: landscape) {
+            .faq-container { padding-top: calc(env(safe-area-inset-top, 0px) + 16px); }
+            .faq-header { margin-bottom: 24px; }
         }
     </style>
 </head>

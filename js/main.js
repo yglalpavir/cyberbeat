@@ -21,7 +21,22 @@ async function init() {
         if (renderer) renderer.resize();
     });
 
-    // 性能监控快捷切换: 按 ~ 键
+    // 移动端地址栏收起/展开会导致 innerHeight 变化，visualViewport 更可靠
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            if (renderer) renderer.resize();
+        });
+    }
+
+    // 屏幕旋转后重算布局与安全区
+    window.addEventListener('orientationchange', () => {
+        // Safari 在 orientationchange 时 innerHeight 尚未更新，延迟两帧重算
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (renderer) renderer.resize();
+        }));
+    });
+
+    // 性能监控快捷切换: 按 ~ 键（触屏设备无键盘，连点暂停按钮 5 次切换）
     document.addEventListener('keydown', (e) => {
         if (e.key === '`' || e.key === '~') {
             e.preventDefault();
@@ -30,12 +45,25 @@ async function init() {
     });
 
     _lastFrameTime = performance.now();
+    // 开始画面只有静态背景，触屏设备降至 ~30fps 省电（桌面保持满帧）
+    _startScreenFrameInterval = IS_TOUCH_DEVICE ? 33 : 0;
     requestAnimationFrame(renderStartScreen);
 }
+
+// 开始画面限帧间隔（ms），0 表示不限制
+let _startScreenFrameInterval = 0;
 
 function renderStartScreen(ts) {
     if (gameState.screen !== 'start') return;
     perfMonitor.beginFrame();
+
+    // 限帧：距离上一帧不足间隔时跳过本帧绘制（仍继续 rAF 循环）
+    if (_startScreenFrameInterval > 0 && ts - _lastFrameTime < _startScreenFrameInterval) {
+        requestAnimationFrame(renderStartScreen);
+        return;
+    }
+    _lastFrameTime = ts;
+
     const ctx = renderer.ctx;
     ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
     renderer.drawBackground(ts);
@@ -48,6 +76,9 @@ function gameLoop(timestamp) {
     if (gameState.screen !== 'game') return;
 
     perfMonitor.beginFrame();
+
+    // 每帧同步游戏内 DOM 控件（暂停按钮 / 跳过前奏按钮）
+    if (ui) ui.updateInGameUI();
 
     // === 帧时序平滑 (VSync) ===
     // 限制最大帧间隔为 50ms (20fps 下限)，防止大跳帧导致的间断感

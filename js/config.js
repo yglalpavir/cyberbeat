@@ -115,6 +115,18 @@ const TRACK_COLORS = ['#4dabf7', '#69db7c', '#ff6b6b', '#ffd43b'];
 const TRACK_KEYS = ['D', 'F', 'J', 'K'];
 const UI_SCALE = 1.25;
 
+// ==================== 设备 / 触控检测 ====================
+// 混合设备（触屏笔记本）只有在没有精确指针时才启用触控布局，
+// 避免鼠标用户被强制显示移动端控件。
+const IS_TOUCH_DEVICE = (() => {
+    const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    const hasTouch = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
+    return coarse || (hasTouch && window.innerWidth <= 1024);
+})();
+
+document.documentElement.classList.toggle('is-touch', IS_TOUCH_DEVICE);
+document.documentElement.classList.toggle('is-pointer-fine', !IS_TOUCH_DEVICE);
+
 // ==================== 速度设置 ====================
 
 const MIN_SPEED = 6.0;

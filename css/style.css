@@ -45,6 +45,12 @@
     /* 过渡 */
     --transition-fast: 0.15s ease;
     --transition-smooth: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* 安全区（刘海屏 / 手势条），JS 侧读取同名变量 */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
 }
 
 /* ============================================================
@@ -59,6 +65,9 @@
 html {
     -webkit-tap-highlight-color: transparent;
     font-size: 16px;
+    /* 防止旋转/地址栏收起时的闪烁 */
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -75,6 +84,15 @@ body {
     -webkit-overflow-scrolling: auto;
     touch-action: manipulation;
     position: fixed;
+    /* 无手势边距，铺满刘海屏 */
+    padding: 0;
+}
+
+/* 触屏设备全局：禁长按呼出菜单/选择 */
+html.is-touch body {
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* ============================================================
@@ -1682,7 +1700,152 @@ body {
 .perf-bad  { color: #ff6b6b; }
 
 /* ============================================================
-   移动端控制
+   游戏内触控 UI（暂停按钮 / 跳过前奏 / 暂停面板）
+   ============================================================ */
+.game-pause-btn {
+    display: none;
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    right: calc(env(safe-area-inset-right, 0px) + 12px);
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: rgba(22, 22, 31, 0.78);
+    border: 1px solid var(--border-medium);
+    color: var(--text-primary);
+    font-size: 1.15rem;
+    font-family: var(--font-family);
+    z-index: 30;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform var(--transition-fast), background var(--transition-fast);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+.game-pause-btn:active {
+    transform: scale(0.9);
+    background: rgba(40, 40, 56, 0.9);
+}
+
+/* 暂停按钮仅触屏设备显示（桌面使用 ESC / P 键） */
+html.is-touch body.game-active .game-pause-btn {
+    display: flex;
+}
+
+.skip-intro-btn {
+    display: none;
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    padding: 10px 24px;
+    font-family: var(--font-family);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #fff;
+    background: rgba(22, 22, 31, 0.8);
+    border: 1px solid rgba(77, 171, 247, 0.45);
+    border-radius: 999px;
+    cursor: pointer;
+    animation: pulseSoft 1.6s ease-in-out infinite;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+.skip-intro-btn:active {
+    transform: translateX(-50%) scale(0.95);
+    background: rgba(77, 171, 247, 0.25);
+}
+
+@keyframes pulseSoft {
+    0%, 100% { opacity: 0.75; }
+    50% { opacity: 1; }
+}
+
+/* 组件级 hidden（区别于 .screen 的淡出过渡） */
+.game-pause-btn.hidden,
+.skip-intro-btn.hidden,
+.pause-overlay.hidden {
+    display: none;
+}
+
+/* 触屏设备游戏内：JS 移除 hidden 后真正显示跳过前奏按钮 */
+html.is-touch body.game-active .skip-intro-btn:not(.hidden) {
+    display: block;
+}
+
+.pause-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    /* 画布内已绘制压暗遮罩，这里仅提供卡片容器 */
+}
+
+.pause-card {
+    width: 100%;
+    max-width: 340px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: center;
+    animation: fadeScale 0.25s ease;
+}
+
+.pause-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: 3px;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.pause-sub {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.pause-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.pause-hint {
+    font-size: 0.68rem;
+    color: var(--text-tertiary);
+    letter-spacing: 0.5px;
+}
+
+/* 触屏设备隐藏键盘提示 */
+html.is-touch .pause-hint {
+    display: none;
+}
+
+/* ============================================================
+   移动端控制（触控轨道按键）
+   仅游戏进行中显示，避免遮挡选曲/设置/结算/排行榜界面
    ============================================================ */
 #mobileControls {
     display: none;
@@ -1692,18 +1855,21 @@ body {
     width: 100%;
     z-index: 20;
     pointer-events: none;
-    padding: env(safe-area-inset-bottom, 12px) 8px 12px 8px;
+    padding: env(safe-area-inset-bottom, 10px) 6px 8px 6px;
+}
+
+body.game-active #mobileControls {
+    display: block;
 }
 
 .mobile-btns {
     display: flex;
     justify-content: center;
-    gap: 8px;
-    height: 70px;
+    gap: 6px;
+    height: 80px;
     pointer-events: auto;
-    max-width: 480px;
-    margin: 0 auto;
-    padding: 4px;
+    width: 100%;
+    padding: 2px;
 }
 
 .mobile-btn {
@@ -1720,11 +1886,15 @@ body {
     cursor: pointer;
     transition: transform 0.08s ease, opacity 0.1s, box-shadow 0.1s;
     -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
+    /* manipulation 仍会延迟 click，游戏按键需要即时响应 */
+    touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-touch-callout: none;
     position: relative;
     overflow: hidden;
+    /* 底部与手势条保持距离，手指按压区域更大 */
+    min-height: 64px;
 }
 
 .mobile-btn::after {
@@ -1764,20 +1934,32 @@ body {
     letter-spacing: 0.5px;
 }
 
+/* 纯触屏设备：隐藏键盘字母，放大居中轨道数字 */
+html.is-touch .mobile-btn {
+    font-size: 0;
+}
+
+html.is-touch .mobile-btn::before {
+    position: static;
+    transform: translateY(0);
+    font-size: 1.35rem;
+    font-weight: 700;
+    opacity: 0.9;
+    letter-spacing: 0;
+}
+
 /* ============================================================
-   响应式 - 手机 (< 768px)
+   响应式 - 手机竖屏 (< 768px)
    ============================================================ */
-@media (max-width: 768px) {
-    #mobileControls { display: block; }
-    #perfMonitor { top: auto; bottom: 90px; font-size: 0.6rem; padding: 3px 10px; gap: 8px; }
+@media (max-width: 768px) and (orientation: portrait) {
+    #perfMonitor { top: auto; bottom: 100px; font-size: 0.6rem; padding: 3px 10px; gap: 8px; }
 
     html { font-size: 15px; }
 
     .start-layout {
         flex-direction: column;
         width: 96vw;
-        max-height: 88vh;
-        max-height: 88dvh;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
         gap: 10px;
     }
 
@@ -1786,7 +1968,7 @@ body {
         flex-direction: row;
         flex-wrap: wrap;
         align-items: center;
-        padding: 16px 12px;
+        padding: 14px 12px;
         gap: 8px;
     }
 
@@ -1808,33 +1990,71 @@ body {
         flex: 1;
         flex-direction: row;
         min-width: 100%;
+        gap: 8px;
     }
 
-    .start-actions .btn { font-size: 0.75rem; padding: 10px 12px; }
+    .start-actions .btn { font-size: 0.75rem; padding: 12px 10px; }
 
-    .start-main { max-height: 50vh; }
+    .start-main { flex: 1; min-height: 0; }
 
-    .song-panel { min-height: 220px; }
+    .song-panel { min-height: 200px; }
 
-    .song-card { padding: 10px 10px; }
+    .song-list-wrapper {
+        padding: 10px 12px 14px;
+        /* iOS 惯性滚动 */
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .song-card { padding: 10px 10px; min-height: 44px; }
     .card-title { font-size: 0.78rem; }
     .card-sub { font-size: 0.65rem; }
+    /* 触屏设备放大点击热区 */
+    html.is-touch .song-card { padding: 12px 10px; }
 
-    .settings-card {
-        width: 94vw;
-        padding: 20px;
-        gap: 14px;
-        max-height: 90vh;
-        overflow-y: auto;
+    /* ===== 设置面板：小屏改为全屏铺满 + 内部滚动 ===== */
+    .settings-overlay {
+        padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
     }
 
-    .diff-selector { grid-template-columns: repeat(4, 1fr); gap: 3px; }
-    .diff-btn { padding: 10px 2px; font-size: 0.68rem; }
+    .settings-card {
+        width: 96vw;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        padding: 18px 16px;
+        gap: 12px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .diff-selector { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+    .diff-btn { padding: 12px 2px; font-size: 0.68rem; }
+
+    /* 触屏滑块加大拇指 */
+    .volume-slider::-webkit-slider-thumb {
+        width: 26px;
+        height: 26px;
+    }
+
+    .volume-slider::-moz-range-thumb {
+        width: 26px;
+        height: 26px;
+        border: none;
+        background: var(--accent);
+        border-radius: 50%;
+    }
+
+    /* ===== 结算画面：可滚动，避免内容溢出屏幕 ===== */
+    .result-overlay {
+        padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+        align-items: flex-start;
+    }
 
     .result-card {
         max-width: 96vw;
         padding: 20px 16px;
-        gap: 16px;
+        gap: 14px;
+        max-height: 100%;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
     .rank { font-size: 3.5rem; }
@@ -1843,16 +2063,36 @@ body {
     .stat-box { padding: 8px 4px; }
     .stat-value { font-size: 0.85rem; }
 
-    .chart-box { height: 120px; }
+    .chart-box { height: 110px; flex-shrink: 0; }
 
-    .result-actions .btn { font-size: 0.8rem; padding: 10px 14px; }
+    .result-actions .btn { font-size: 0.8rem; padding: 12px 14px; }
 
-    /* 排行榜移动端 */
-    .lb-card { max-width: 96vw; max-height: 92vh; }
+    /* ===== 排行榜移动端：全屏化 + 内部滚动 ===== */
+    .lb-overlay {
+        padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+    }
+
+    .lb-card {
+        max-width: 100vw;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+    }
+
     .lb-header { padding: 14px 16px 10px; }
     .lb-header h2 { font-size: 1rem; }
+    .lb-close-btn { width: 40px; height: 40px; }
+
     .lb-filter, .lb-sort, .lb-list-wrapper { padding-left: 16px; padding-right: 16px; }
-    .lb-record { padding: 8px 10px; gap: 6px; }
+
+    .lb-list-wrapper {
+        max-height: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .lb-record { padding: 10px 12px; gap: 8px; min-height: 44px; }
     .lb-record-name { font-size: 0.75rem; }
     .lb-record-score { font-size: 0.78rem; }
     .lb-record-rank-badge { font-size: 0.7rem; padding: 2px 8px; }
@@ -1860,51 +2100,136 @@ body {
     .lb-detail-stats { grid-template-columns: repeat(4, 1fr); gap: 4px; }
     .lb-io { padding: 10px 16px; flex-wrap: wrap; }
 
-    /* 移动端横屏优化 */
-    @media (orientation: landscape) {
-        .start-layout {
-            flex-direction: row;
-            max-height: 70vh;
-            max-height: 70dvh;
-            gap: 10px;
-        }
+    #lbBackBtn { margin-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 
-        .start-sidebar {
-            width: 200px;
-            flex-direction: column;
-            padding: 12px;
-        }
-
-        .start-main { max-height: none; }
-
-        .logo { font-size: 1.2rem; }
-        .start-actions { flex-direction: column; min-width: auto; }
-
-        .song-card { padding: 8px; }
-        .card-meta { display: none; }
-
-        #mobileControls { display: none; }
-
-        #perfMonitor {
-            top: 4px;
-            bottom: auto;
-            font-size: 0.55rem;
-            padding: 2px 8px;
-            gap: 6px;
-        }
+    /* .osz 选择器移动端 */
+    .osz-picker {
+        max-width: 96vw;
+        max-height: 88dvh;
     }
 }
 
 /* ============================================================
-   响应式 - 小手机 (< 380px)
+   手机横屏 / 矮窗口（landscape 且高度 ≤ 520px）
+   覆盖 844×390 / 926×428 等横屏手机 —— 它们宽度 > 768px，
+   不能依赖 max-width 断点，必须用高度判断
    ============================================================ */
-@media (max-width: 380px) {
+@media (orientation: landscape) and (max-height: 520px) {
     html { font-size: 14px; }
 
-    .mobile-btns { height: 58px; gap: 4px; max-width: 100%; padding: 2px; }
-    .mobile-btn { font-size: 1.2rem; border-radius: 10px; }
+    .start-layout {
+        flex-direction: row;
+        width: min(96vw, 1100px);
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        gap: 10px;
+    }
 
-    #perfMonitor { bottom: 72px; }
+    .start-sidebar {
+        width: 200px;
+        flex-direction: column;
+        padding: 12px;
+        gap: 10px;
+        overflow-y: auto;
+    }
+
+    .current-selection { flex: none; }
+
+    .start-actions { flex-direction: column; min-width: auto; flex: none; gap: 6px; }
+    .start-actions .btn { font-size: 0.72rem; padding: 9px 10px; }
+
+    .start-main { max-height: none; min-height: 0; }
+
+    .logo { font-size: 1.2rem; }
+    .subtitle { letter-spacing: 1px; }
+
+    .song-card { padding: 8px; min-height: 40px; }
+    .card-meta { display: none; }
+
+    /* ===== 设置面板：矮窗口全屏化 + 内部滚动 ===== */
+    .settings-card {
+        width: min(96vw, 560px);
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        padding: 14px 16px;
+        gap: 10px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* ===== 结算画面：矮窗口可滚动 ===== */
+    .result-overlay {
+        padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px calc(env(safe-area-inset-bottom, 0px) + 8px);
+        align-items: center;
+    }
+
+    .result-card {
+        max-width: min(96vw, 560px);
+        padding: 14px 16px;
+        gap: 10px;
+        max-height: 100%;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .rank { font-size: 2.6rem; }
+    .stat-big .stat-value { font-size: 1.1rem; }
+    .chart-box { height: 80px; flex-shrink: 0; }
+    .result-actions { gap: 8px; }
+    .result-actions .btn { font-size: 0.75rem; padding: 9px 12px; }
+
+    /* ===== 排行榜：矮窗口全屏化 ===== */
+    .lb-card {
+        max-width: min(100vw, 700px);
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+    }
+
+    .lb-list-wrapper { max-height: none; -webkit-overflow-scrolling: touch; }
+    .lb-record { padding: 8px 10px; min-height: 40px; }
+
+    /* 横屏时触控键收窄放右下，性能面板移至左上 */
+    #mobileControls {
+        left: auto;
+        right: 0;
+        width: 46%;
+        padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)) 6px;
+    }
+
+    .mobile-btns { height: 56px; gap: 4px; }
+    .mobile-btn { font-size: 1.1rem; min-height: 48px; }
+
+    #perfMonitor {
+        top: calc(env(safe-area-inset-top, 0px) + 4px);
+        bottom: auto;
+        left: 12px;
+        transform: none;
+        font-size: 0.55rem;
+        padding: 2px 8px;
+        gap: 6px;
+    }
+
+    .game-pause-btn {
+        width: 40px;
+        height: 40px;
+        top: calc(env(safe-area-inset-top, 0px) + 8px);
+        right: calc(env(safe-area-inset-right, 0px) + 8px);
+    }
+}
+
+/* 非触屏设备（鼠标精确指针）永不显示触控键，即使窗口矮/窄 */
+html.is-pointer-fine body.game-active #mobileControls { display: none; }
+html.is-pointer-fine .game-pause-btn { display: none; }
+
+/* ============================================================
+   响应式 - 小手机竖屏 (< 380px)
+   ============================================================ */
+@media (max-width: 380px) and (orientation: portrait) {
+    html { font-size: 14px; }
+
+    .mobile-btns { height: 66px; gap: 4px; }
+    .mobile-btn { font-size: 1.2rem; border-radius: 10px; min-height: 54px; }
+
+    #perfMonitor { bottom: 78px; }
 
     .logo { font-size: 1.2rem; }
     .start-sidebar { padding: 10px 8px; }
@@ -1917,24 +2242,24 @@ body {
     .card-arrow { display: none; }
 
     .settings-card { padding: 14px; gap: 10px; }
-    .diff-btn { font-size: 0.62rem; padding: 8px 1px; }
+    .diff-btn { font-size: 0.62rem; padding: 10px 1px; }
 
     .result-card { padding: 14px 10px; }
     .rank { font-size: 3rem; }
     .stats-grid { gap: 4px; }
     .stat-box { padding: 6px 2px; }
 
-    .lb-card { max-width: 98vw; }
-    .lb-record { padding: 6px 8px; gap: 4px; }
+    .lb-record { padding: 8px 8px; gap: 4px; }
     .lb-record-meta { font-size: 0.6rem; }
     .lb-record-score { font-size: 0.7rem; }
     .lb-detail-stats { grid-template-columns: repeat(4, 1fr); gap: 3px; }
 }
 
 /* ============================================================
-   响应式 - 平板 (768px - 1024px)
+   响应式 - 平板 (768px - 1024px 竖屏 / 全部横屏)
    ============================================================ */
-@media (min-width: 769px) and (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 1024px) and (orientation: portrait),
+       (orientation: landscape) and (min-height: 521px) and (max-width: 1024px) {
     .start-layout { max-width: 92vw; gap: 18px; }
     .start-sidebar { width: 230px; }
 

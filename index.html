@@ -3,14 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CyberBeat">
+    <meta name="format-detection" content="telephone=no, email=no, address=no">
+    <meta name="color-scheme" content="dark">
     <meta name="theme-color" content="#0b0b12">
     <title>CyberBeat Pixel</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
+
+    <!-- ==================== 游戏内触控 UI ==================== -->
+    <button id="gamePauseBtn" class="game-pause-btn" type="button" aria-label="暂停游戏">
+        <span aria-hidden="true">Ⅱ</span>
+    </button>
+    <button id="skipIntroBtn" class="skip-intro-btn hidden" type="button">SKIP INTRO</button>
+    <div id="pauseOverlay" class="pause-overlay hidden">
+        <div class="pause-card">
+            <div class="pause-title">PAUSED</div>
+            <div class="pause-sub">游戏已暂停</div>
+            <div class="pause-actions">
+                <button class="btn btn-primary" id="pauseResumeBtn" type="button">▶ RESUME</button>
+                <button class="btn btn-secondary" id="pauseRetryBtn" type="button">↻ RETRY</button>
+                <button class="btn btn-secondary" id="pauseHomeBtn" type="button">⌂ HOME</button>
+            </div>
+            <div class="pause-hint">ESC / P 继续 · R 重试 · H 返回</div>
+        </div>
+    </div>
 
     <!-- ==================== 开始画面 ==================== -->
     <div id="startScreen" class="screen">
@@ -321,10 +345,10 @@
     <!-- ==================== 移动端触控轨道 ==================== -->
     <div id="mobileControls">
         <div class="mobile-btns">
-            <button class="mobile-btn" data-track="0">D</button>
-            <button class="mobile-btn" data-track="1">F</button>
-            <button class="mobile-btn" data-track="2">J</button>
-            <button class="mobile-btn" data-track="3">K</button>
+            <button class="mobile-btn" data-track="0" data-track-label="1">D</button>
+            <button class="mobile-btn" data-track="1" data-track-label="2">F</button>
+            <button class="mobile-btn" data-track="2" data-track-label="3">J</button>
+            <button class="mobile-btn" data-track="3" data-track-label="4">K</button>
         </div>
     </div>
 

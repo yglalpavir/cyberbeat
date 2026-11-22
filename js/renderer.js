@@ -7,6 +7,13 @@ class Renderer {
         this.canvasWidth = 0;
         this.canvasHeight = 0;
         this.trackStartX = 0;
+        this._dpr = 1;
+        this._hudScale = 1;
+        this._safeTop = 0;
+        this._safeRight = 0;
+        this._safeBottom = 0;
+        this._safeLeft = 0;
+        this._controlsHeight = 0;
 
         // 预计算轨道坐标
         this.trackPositions = [];   // [{x, cx, hitX, hitW}]
@@ -44,8 +51,41 @@ class Renderer {
     resize() {
         this.canvasWidth = window.innerWidth;
         this.canvasHeight = window.innerHeight;
-        this.canvas.width = this.canvasWidth;
-        this.canvas.height = this.canvasHeight;
+
+        // 读取安全区（刘海屏 / 手势条），由 CSS 自定义属性提供
+        const rootStyle = getComputedStyle(document.documentElement);
+        const readPx = (name) => {
+            const v = parseFloat(rootStyle.getPropertyValue(name));
+            return Number.isFinite(v) ? v : 0;
+        };
+        this._safeTop = readPx('--safe-top');
+        this._safeRight = readPx('--safe-right');
+        this._safeBottom = readPx('--safe-bottom');
+        this._safeLeft = readPx('--safe-left');
+
+        // 高 DPI 屏幕按 devicePixelRatio 渲染：
+        // 桌面上限 2；触屏设备限 1.5（旗艖手机 3x DPR 全渲染易掉帧），
+        // 小屏/低端机（内存较小）进一步降为 1.25
+        const rawDpr = window.devicePixelRatio || 1;
+        let dprCap = 2;
+        if (IS_TOUCH_DEVICE) {
+            dprCap = this.canvasWidth * rawDpr > 1600 ? 1.5 : 1.75;
+        }
+        const dpr = Math.min(rawDpr, dprCap);
+        this._dpr = dpr;
+        this.canvas.width = Math.round(this.canvasWidth * dpr);
+        this.canvas.height = Math.round(this.canvasHeight * dpr);
+        this.canvas.style.width = this.canvasWidth + 'px';
+        this.canvas.style.height = this.canvasHeight + 'px';
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // 窄屏自适应轨道宽度：320px 也能完整放下 4 轨
+        const gap = this.canvasWidth < 480 ? 8 : 12;
+        const sidePadding = this.canvasWidth < 480 ? 20 : 32;
+        const availableWidth = this.canvasWidth - sidePadding;
+        const fittedWidth = Math.floor((availableWidth - gap * (CONFIG.trackCount - 1)) / CONFIG.trackCount);
+        CONFIG.trackWidth = Math.max(44, Math.min(80, fittedWidth));
+        CONFIG.trackSpacing = gap;
 
         const totalTrackWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * CONFIG.trackSpacing;
         this.trackStartX = (this.canvasWidth - totalTrackWidth) / 2;
@@ -62,8 +102,27 @@ class Renderer {
             });
         }
 
-        // 预计算判定线 Y
-        this._judgmentY = this.canvasHeight * CONFIG.judgmentLineY;
+        // 判定线：为底部触控键和安全区留出空间，避免音符被手指/手势条遮挡
+        this._controlsHeight = IS_TOUCH_DEVICE ? (this.canvasHeight <= 520 ? 68 : 92) : 0;
+        const reservedBottom = this._controlsHeight + this._safeBottom + 12;
+        const availableHeight = Math.max(180, this.canvasHeight - reservedBottom);
+        const desiredY = this.canvasHeight * CONFIG.judgmentLineY;
+        const maxY = Math.max(120, availableHeight - 18);
+        this._judgmentY = Math.min(Math.max(availableHeight * 0.62, Math.min(desiredY, maxY)), this.canvasHeight - 40);
+
+        // HUD 缩放（小屏使用较小字号，但不低于可读下限）
+        this._hudScale = Math.max(0.78, Math.min(1, Math.min(this.canvasWidth, this.canvasHeight) / 480));
+
+        // 触屏窄屏：HUD 左上 P/G/M 三列在 100*s 间距下会超出 320px 宽度，压缩间距
+        this._hudCompact = this.canvasWidth < 380 && IS_TOUCH_DEVICE;
+
+        // 触屏设备右上角有暂停按钮，血条左移避让
+        this._hudRightInset = IS_TOUCH_DEVICE ? 58 : 0;
+
+        // 触屏设备减半打击粒子，降低绘制压力（特效密度对玩法无影响）
+        if (IS_TOUCH_DEVICE) {
+            CONFIG.effects.particleCount = 5;
+        }
 
         // 清除缓存
         this._bgGradient = null;
@@ -545,51 +604,61 @@ class Renderer {
     // ========== HUD ==========
     drawHUD() {
         const ctx = this.ctx;
+        const s = this._hudScale;
+        // 矮窗口（横屏手机）时性能面板固定在左上，HUD 整体下移避让
+        const perfAvoid = (this.canvasHeight <= 520 && IS_TOUCH_DEVICE) ? 26 : 0;
+        const left = this._safeLeft + 30 * s;
+        const top = this._safeTop + (30 + perfAvoid) * s;
         ctx.save();
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 14px sans-serif';
+        ctx.font = `bold ${14 * s}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.fillText('SCORE', 30, 30);
-        ctx.font = 'bold 28px sans-serif';
+        ctx.fillText('SCORE', left, top);
+        ctx.font = `bold ${28 * s}px sans-serif`;
         ctx.fillStyle = '#4dabf7';
         // 实时最终分 = 判定分 + 连击分，与结算一致
-        ctx.fillText(gameState.calculateFinalScore().finalScore.toLocaleString(), 30, 55);
+        ctx.fillText(gameState.calculateFinalScore().finalScore.toLocaleString(), left, top + 25 * s);
 
-        const hX = this.canvasWidth - 180;
+        const healthW = 140 * s;
+        const healthH = 14 * s;
+        const hX = this.canvasWidth - this._safeRight - (30 + this._hudRightInset) * s - healthW;
+        const hY = this._safeTop + 25 * s;
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         ctx.beginPath();
-        ctx.roundRect(hX, 25, 140, 14, 7);
+        ctx.roundRect(hX, hY, healthW, healthH, healthH / 2);
         ctx.fill();
         const healthColor = gameState.health > 60 ? '#69db7c' : gameState.health > 30 ? '#ffd43b' : '#ff6b6b';
         ctx.fillStyle = healthColor;
         ctx.beginPath();
-        ctx.roundRect(hX, 25, Math.max(0, 140 * gameState.health / CONFIG.health.initial), 14, 7);
+        ctx.roundRect(hX, hY, Math.max(0, healthW * gameState.health / CONFIG.health.initial), healthH, healthH / 2);
         ctx.fill();
 
         if (gameState.combo > 0) {
-            ctx.font = 'bold 36px sans-serif';
+            ctx.font = `bold ${36 * s}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.fillStyle = '#ffffff';
-            ctx.fillText(gameState.combo, this.canvasWidth / 2, this.canvasHeight / 2 - 10);
-            ctx.font = '12px sans-serif';
+            ctx.fillText(gameState.combo, this.canvasWidth / 2, this.canvasHeight / 2 - 10 * s);
+            ctx.font = `${12 * s}px sans-serif`;
             ctx.fillStyle = '#aaaaaa';
-            ctx.fillText('COMBO', this.canvasWidth / 2, this.canvasHeight / 2 + 22);
+            ctx.fillText('COMBO', this.canvasWidth / 2, this.canvasHeight / 2 + 22 * s);
         }
 
-        ctx.font = '13px sans-serif';
+        ctx.font = `${13 * s}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffd43b';
-        ctx.fillText('P:' + gameState.perfect, 30, 100);
+        // 窄屏压缩判定统计列间距，防止 P/G/M 溢出屏幕右侧
+        const colGap = this._hudCompact ? 72 * s : 100 * s;
+        ctx.fillText('P:' + gameState.perfect, left, top + 70 * s);
         ctx.fillStyle = '#69db7c';
-        ctx.fillText('G:' + gameState.great, 130, 100);
+        ctx.fillText('G:' + gameState.great, left + colGap, top + 70 * s);
         ctx.fillStyle = '#ff6b6b';
-        ctx.fillText('M:' + gameState.miss, 230, 100);
+        ctx.fillText('M:' + gameState.miss, left + colGap * 2, top + 70 * s);
 
         const acc = gameState.calculateTotalAcc();
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('ACC:' + acc.toFixed(2) + '%', 30, 125);
+        ctx.fillText('ACC:' + acc.toFixed(2) + '%', left, top + 95 * s);
 
         ctx.restore();
     }
@@ -601,6 +670,8 @@ class Renderer {
      * 在判定线附近提示「Press Space to skip」
      */
     drawSkipIntroHint() {
+        // 触屏设备使用 DOM 按钮，避免画布提示无法点击
+        if (IS_TOUCH_DEVICE) return;
         if (gameState.screen !== 'game' || gameState.paused) return;
         if (!audioEngine.isPlaying || audioEngine._paused) return;
 
@@ -615,8 +686,9 @@ class Renderer {
         ctx.save();
 
         const cx = this.canvasWidth / 2;
-        const cy = CONFIG.judgmentLineY * this.canvasHeight;
+        const cy = this._judgmentY;
         const pulse = 0.55 + 0.3 * Math.sin(performance.now() / 280);
+        const label = 'Press SPACE ×2 to skip';
 
         ctx.font = 'bold 16px sans-serif';
         ctx.textAlign = 'center';
@@ -624,51 +696,23 @@ class Renderer {
 
         // 背景发光
         ctx.fillStyle = `rgba(0, 0, 0, ${0.38 * pulse})`;
-        const w = ctx.measureText('Press Space to skip').width;
+        const w = ctx.measureText(label).width;
         ctx.beginPath();
         ctx.roundRect(cx - w / 2 - 18, cy - 80, w + 36, 34, 17);
         ctx.fill();
 
-        // 高亮 "Space" 部分
         ctx.fillStyle = `rgba(255, 255, 255, ${pulse.toFixed(3)})`;
-        ctx.fillText('Press ', cx - 26, cy - 63);
-        ctx.fillStyle = `rgba(77, 171, 247, ${Math.min(1, pulse + 0.2).toFixed(3)})`;
-        ctx.fillText('Space', cx + 16, cy - 63);
-        ctx.fillStyle = `rgba(255, 255, 255, ${pulse.toFixed(3)})`;
-        ctx.fillText(' to skip', cx + 56, cy - 63);
+        ctx.fillText(label, cx, cy - 63);
 
         ctx.restore();
     }
 
     // ========== 暂停遮罩 ==========
     drawPauseOverlay() {
+        // 只负责压暗画面；文字与按钮由 #pauseOverlay DOM 提供
         const ctx = this.ctx;
-        const w = this.canvasWidth;
-        const h = this.canvasHeight;
-
         ctx.fillStyle = 'rgba(5, 5, 12, 0.72)';
-        ctx.fillRect(0, 0, w, h);
-
-        const cx = w / 2;
-        const cy = h / 2;
-
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-        ctx.beginPath();
-        ctx.roundRect(cx - 190, cy - 90, 380, 180, 16);
-        ctx.fill();
-
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 44px sans-serif';
-        ctx.fillText('PAUSED', cx, cy - 34);
-
-        ctx.fillStyle = '#9a9ab8';
-        ctx.font = '16px sans-serif';
-        ctx.fillText('ESC / P  继续', cx, cy + 8);
-        ctx.fillText('R  重试', cx, cy + 40);
-        ctx.fillText('H  返回主菜单', cx, cy + 72);
-        ctx.textAlign = 'left';
+        ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
 
     // ========== 图表 ==========
@@ -678,10 +722,14 @@ class Renderer {
         const cCtx = chartCanvas.getContext('2d');
         const container = chartCanvas.parentElement;
         if (!container) return;
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        chartCanvas.width = w;
-        chartCanvas.height = h;
+        const w = Math.max(1, container.clientWidth);
+        const h = Math.max(1, container.clientHeight);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        chartCanvas.width = Math.round(w * dpr);
+        chartCanvas.height = Math.round(h * dpr);
+        chartCanvas.style.width = w + 'px';
+        chartCanvas.style.height = h + 'px';
+        cCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
         cCtx.clearRect(0, 0, w, h);
 
         if (historyData.length === 0) return;
