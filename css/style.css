@@ -135,6 +135,17 @@ html.is-touch body {
 /* ============================================================
    通用按钮
    ============================================================ */
+/* 键盘/切换设备导航时的焦点可见性（触屏点按不显示） */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="switch"]:focus-visible,
+input:focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .btn {
     display: inline-flex;
     align-items: center;
