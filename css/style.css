@@ -957,6 +957,111 @@ html.is-touch .touch-offset-hint {
     display: block;
 }
 
+/* ============================================================
+   触屏热区达标（仅触屏设备 + 手机竖屏）：
+   全部可交互元素高度提升到 >= 40px（44px 理想）
+   ============================================================ */
+@media (max-width: 768px) and (orientation: portrait) {
+    html.is-touch .btn {
+        min-height: 44px;
+    }
+
+    /* 标签页切换按钮 */
+    html.is-touch .panel-tab {
+        padding: 12px 16px;
+        min-height: 40px;
+    }
+
+    /* 滑块：视觉轨道不变，扩大可点区域与拇指 */
+    html.is-touch .volume-slider {
+        height: 24px;                 /* 命中区加高（轨道用背景渐变绘制的部分不变） */
+        background: linear-gradient(to bottom, transparent 40%, rgba(255,255,255,0.1) 40%, rgba(255,255,255,0.1) 60%, transparent 60%);
+        border-radius: 0;
+        margin: -6px 0;
+    }
+
+    html.is-touch .volume-slider::-webkit-slider-thumb {
+        width: 28px;
+        height: 28px;
+        margin-top: -2px;
+    }
+
+    html.is-touch .volume-slider::-moz-range-thumb {
+        width: 28px;
+        height: 28px;
+    }
+
+    html.is-touch .volume-slider::-moz-range-track {
+        height: 6px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+    }
+
+    /* 排行榜排序按钮 */
+    html.is-touch .lb-sort-btn {
+        padding: 10px 14px;
+        min-height: 40px;
+    }
+
+    /* 排行榜导入/导出小按钮 */
+    html.is-touch .lb-io .btn-sm {
+        padding: 12px 12px;
+        min-height: 44px;
+        font-size: 0.8rem;
+    }
+
+    /* 排行榜关闭按钮 */
+    html.is-touch .lb-close-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    /* 触屏开关 */
+    html.is-touch .toggle-switch {
+        width: 56px;
+        height: 40px;
+    }
+
+    html.is-touch .toggle-knob {
+        width: 30px;
+        height: 30px;
+        top: 5px;
+        left: 5px;
+    }
+
+    html.is-touch .toggle-switch[aria-checked="true"] .toggle-knob {
+        transform: translateX(16px);
+    }
+}
+
+/* 手机横屏矮窗口：同步提升关键热区 */
+@media (orientation: landscape) and (max-height: 520px) {
+    html.is-touch .btn {
+        min-height: 40px;
+    }
+
+    html.is-touch .volume-slider {
+        height: 22px;
+        background: linear-gradient(to bottom, transparent 40%, rgba(255,255,255,0.1) 40%, rgba(255,255,255,0.1) 60%, transparent 60%);
+        border-radius: 0;
+        margin: -5px 0;
+    }
+
+    html.is-touch .volume-slider::-webkit-slider-thumb {
+        width: 24px;
+        height: 24px;
+    }
+
+    html.is-touch .lb-sort-btn {
+        padding: 8px 12px;
+        min-height: 38px;
+    }
+
+    html.is-touch .lb-io .btn-sm {
+        min-height: 40px;
+    }
+}
+
 /* ===== 开关 (Toggle Switch) ===== */
 .toggle-control {
     display: flex;
@@ -2451,14 +2556,14 @@ html.is-touch .mobile-btn::before {
 
     .result-card {
         max-width: min(96vw, 640px);
-        padding: 12px 16px;
-        gap: 10px;
+        padding: 10px 16px;
+        gap: 8px;
         max-height: 100%;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
     }
 
-    .result-status { padding: 8px 14px; gap: 8px; }
+    .result-status { padding: 6px 14px; gap: 8px; }
     .status-icon { font-size: 1.1rem; }
     .status-text { font-size: 0.8rem; }
 
@@ -2474,10 +2579,12 @@ html.is-touch .mobile-btn::before {
     .stat-label { font-size: 0.55rem; margin-bottom: 3px; }
     .stat-value { font-size: 0.8rem; }
 
-    .chart-box { height: 72px; flex-shrink: 0; }
+    .chart-box { height: 60px; flex-shrink: 0; }
 
-    .result-actions { gap: 8px; }
-    .result-actions .btn { font-size: 0.72rem; padding: 9px 12px; }
+    /* 矮窗口：按钮保持 40px 触控下限，但压缩行间距保证卡片不溢出 */
+    .result-actions { gap: 5px; }
+    .result-actions .btn { font-size: 0.72rem; padding: 5px 12px; min-height: 40px; }
+    .result-actions .result-actions-row { gap: 5px; }
 
     /* 矮窗口：状态徽章与排名合并为一行，节省 50px 高度 */
     .result-card .result-status {
