@@ -1724,6 +1724,8 @@ class UIManager {
         this._setPauseOverlayVisible(false);
         this.setSkipIntroVisible(false);
         this._requestWakeLock();
+        // 后台预加载结算音乐（2MB completed.mp3，多数局为完成）
+        this._preloadResultAudio();
 
         // 隐藏所有 UI
         this.startScreen.classList.add('hidden');
@@ -1982,18 +1984,33 @@ class UIManager {
         return rankLabels[rank] || 'PASS';
     }
 
-    // 播放结算音乐
+    // 播放结算音乐（优先用预加载缓存，未命中时现场加载）
     async playResultAudio(isFailed) {
-        // 获取结算音乐路径
         const audioPath = isFailed
             ? 'assets/result-audio/failed.mp3'
             : 'assets/result-audio/completed.mp3';
+        const cacheKey = 'result-audio:' + (isFailed ? 'failed' : 'completed');
 
-        // 使用 AudioEngine 的 Web Audio API 加载并播放
-        const loaded = await audioEngine.loadAudioFile(audioPath);
+        if (audioEngine.hasCachedAudio(cacheKey)) {
+            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
+            audioEngine.startAudioPlayback(0);
+            return;
+        }
+
+        // 现场加载（首次游玩未预载完成的情形）
+        const loaded = await audioEngine.loadAudioFile(audioPath, { cacheKey });
         if (loaded) {
+            audioEngine.audioBuffer = audioEngine.getCachedAudio(cacheKey);
             audioEngine.startAudioPlayback(0);
         }
+    }
+
+    /** 后台预加载结算音乐（成功曲较小 2MB，进入游戏时提前拉取） */
+    _preloadResultAudio() {
+        const cacheKey = 'result-audio:completed';
+        if (audioEngine.hasCachedAudio(cacheKey)) return;
+        audioEngine.loadAudioFile('assets/result-audio/completed.mp3', { cacheKey, setCurrent: false })
+            .catch(() => { /* 预载失败不影响游戏，结算时再现场加载 */ });
     }
 
     goToHome() {

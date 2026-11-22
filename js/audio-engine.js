@@ -15,9 +15,9 @@ class AudioEngine {
         this.audioSource = null;
         this.audioStartTime = 0;
         this._currentAudioUrl = null;
-        // 解码结果缓存（仅缓存游戏曲目，RETRY / 重选时跳过下载与解码）
-        this._bufferCache = new Map();
-        this._BUFFER_CACHE_MAX = 1;
+        // 解码结果缓存（游戏伴奏与结算音乐各一槽，RETRY / 结算时免下载解码）
+        this._gameBuffer = null;
+        this._resultAudioBuffer = null;
         // 暂停支持
         this._paused = false;
         this._mode = null;          // 'midi' | 'preset' | 'file'
@@ -279,8 +279,8 @@ class AudioEngine {
         this.init();
 
         // 缓存命中：跳过 fetch + decodeAudioData（移动端解码 3MB ogg 可达数秒）
-        if (cacheKey && this._bufferCache.has(cacheKey)) {
-            const cached = this._bufferCache.get(cacheKey);
+        if (cacheKey && this.hasCachedAudio(cacheKey)) {
+            const cached = this.getCachedAudio(cacheKey);
             if (setCurrent) {
                 this.audioBuffer = cached;
                 this._currentAudioUrl = url;
@@ -308,20 +308,29 @@ class AudioEngine {
         }
     }
 
-    /** 写入解码缓存（保留最近 1 首，避免内存膨胀） */
+    /** 写入解码缓存（游戏伴奏 + 结算音乐各占一个槽位，避免互相挤掉） */
     _cacheBuffer(key, buffer) {
-        this._bufferCache.clear();
-        this._bufferCache.set(key, buffer);
+        if (typeof key === 'string' && key.startsWith('result-audio:')) {
+            this._resultAudioBuffer = buffer;
+            return;
+        }
+        this._gameBuffer = buffer;
     }
 
     /** 查询某曲目是否已缓存解码结果 */
     hasCachedAudio(cacheKey) {
-        return this._bufferCache.has(cacheKey);
+        if (typeof cacheKey === 'string' && cacheKey.startsWith('result-audio:')) {
+            return !!this._resultAudioBuffer;
+        }
+        return !!this._gameBuffer;
     }
 
     /** 从缓存取解码结果（不改变当前曲目） */
     getCachedAudio(cacheKey) {
-        return this._bufferCache.get(cacheKey) || null;
+        if (typeof cacheKey === 'string' && cacheKey.startsWith('result-audio:')) {
+            return this._resultAudioBuffer || null;
+        }
+        return this._gameBuffer || null;
     }
 
     /**
