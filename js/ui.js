@@ -2735,6 +2735,17 @@ class UIManager {
             this.lbDetailClose.addEventListener('click', () => {
                 if (this.lbDetail) this.lbDetail.style.display = 'none';
             });
+            // 触屏设备：详情标题行整行点击均可关闭（扩大热区）
+            if (IS_TOUCH_DEVICE) {
+                const header = this.lbDetailClose.closest('.lb-detail-header');
+                if (header) {
+                    header.addEventListener('click', (e) => {
+                        if (e.target !== this.lbDetailClose && this.lbDetail) {
+                            this.lbDetail.style.display = 'none';
+                        }
+                    });
+                }
+            }
         }
 
         // 详情删除

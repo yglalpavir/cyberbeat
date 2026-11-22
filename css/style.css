@@ -1637,6 +1637,18 @@ html.is-pointer-fine #touchFeedbackGroup {
     justify-content: center;
 }
 
+/* 触屏设备放大详情关闭按钮热区并允许整行点击 */
+html.is-touch .lb-detail-close {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+}
+
+html.is-touch .lb-detail-header {
+    cursor: pointer;
+    padding: 4px 0;
+}
+
 .lb-detail-close:hover {
     background: rgba(255, 255, 255, 0.1);
 }
@@ -2117,12 +2129,18 @@ html.is-touch .mobile-btn::before {
 }
 
 /* ============================================================
-   响应式 - 手机竖屏 (< 768px)
+   手机竖屏 (< 768px)
    ============================================================ */
 @media (max-width: 768px) and (orientation: portrait) {
     #perfMonitor { top: auto; bottom: 100px; font-size: 0.6rem; padding: 3px 10px; gap: 8px; }
 
     html { font-size: 15px; }
+
+    /* 结算页按钮：竖屏下加高到触控标准 44px+ */
+    .result-actions .btn {
+        padding: 14px 16px;
+        min-height: 44px;
+    }
 
     .start-layout {
         flex-direction: column;
