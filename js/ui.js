@@ -2011,11 +2011,9 @@ class UIManager {
         // 隐藏结果和排行榜画面
         this.resultScreen.classList.add('hidden');
         if (this.leaderboardScreen) this.leaderboardScreen.classList.add('hidden');
-        // 显示开始画面
+        // 显示开始画面（静态背景，绘制一帧即可）
         this.startScreen.classList.remove('hidden');
-        // 重新渲染开始画面
-        _lastFrameTime = performance.now();
-        requestAnimationFrame(renderStartScreen);
+        repaintStartScreen();
     }
 
     // ========== 重新游玩 ==========
@@ -2804,10 +2802,9 @@ class UIManager {
             this.resultScreen.classList.remove('hidden');
             this.startScreen.classList.add('hidden');
         } else {
-            // 从开始画面进入：返回开始画面
+            // 从开始画面进入：返回开始画面（静态背景，绘制一帧即可）
             this.startScreen.classList.remove('hidden');
-            _lastFrameTime = performance.now();
-            requestAnimationFrame(renderStartScreen);
+            repaintStartScreen();
         }
         this._lbOrigin = 'start';
     }

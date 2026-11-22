@@ -19,12 +19,14 @@ async function init() {
 
     window.addEventListener('resize', () => {
         if (renderer) renderer.resize();
+        repaintStartScreen();
     });
 
     // 移动端地址栏收起/展开会导致 innerHeight 变化，visualViewport 更可靠
     if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', () => {
             if (renderer) renderer.resize();
+            repaintStartScreen();
         });
     }
 
@@ -33,6 +35,7 @@ async function init() {
         // Safari 在 orientationchange 时 innerHeight 尚未更新，延迟两帧重算
         requestAnimationFrame(() => requestAnimationFrame(() => {
             if (renderer) renderer.resize();
+            repaintStartScreen();
             showRotateToast();
         }));
     });
@@ -66,31 +69,28 @@ async function init() {
         }
     });
 
+    // 开始画面只有静态渐变背景：绘制一帧即停止 rAF 空转（移动端省电关键）
     _lastFrameTime = performance.now();
-    // 开始画面只有静态背景，触屏设备降至 ~30fps 省电（桌面保持满帧）
-    _startScreenFrameInterval = IS_TOUCH_DEVICE ? 33 : 0;
     requestAnimationFrame(renderStartScreen);
 }
 
-// 开始画面限帧间隔（ms），0 表示不限制
-let _startScreenFrameInterval = 0;
-
 function renderStartScreen(ts) {
     if (gameState.screen !== 'start') return;
+
+    // 开始画面只有静态渐变背景，无需持续重绘：
+    // 绘制一帧后停止 rAF 循环，切回开始画面/resize 时再触发一次
     perfMonitor.beginFrame();
-
-    // 限帧：距离上一帧不足间隔时跳过本帧绘制（仍继续 rAF 循环）
-    if (_startScreenFrameInterval > 0 && ts - _lastFrameTime < _startScreenFrameInterval) {
-        requestAnimationFrame(renderStartScreen);
-        return;
-    }
-    _lastFrameTime = ts;
-
     const ctx = renderer.ctx;
     ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
     renderer.drawBackground(ts);
     perfMonitor.endFrame();
-    requestAnimationFrame(renderStartScreen);
+}
+
+/** 重新绘制一帧开始画面（screen 切回 start / resize 后调用） */
+function repaintStartScreen() {
+    if (gameState.screen !== 'start') return;
+    _lastFrameTime = performance.now();
+    renderStartScreen(performance.now());
 }
 
 // 全局游戏循环 - 垂直同步平滑帧
