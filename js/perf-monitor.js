@@ -146,14 +146,32 @@ class PerfMonitor {
     }
 
     toggle() {
-        this._visible = !this._visible;
+        // 以"当前实际是否可见"为基准切换（对局中默认显示，菜单里默认隐藏）
+        const visible = this.isVisible();
+        if (visible) this.hide(); else this.show();
+    }
+
+    /** 面板当前是否真的显示（考虑 CSS 与手动开关） */
+    isVisible() {
+        if (!this._container) return this._visible;
+        return this._container.getBoundingClientRect().height > 0;
+    }
+
+    show() {
+        this._visible = true;
         if (this._container) {
-            this._container.style.display = this._visible ? 'flex' : 'none';
+            this._container.classList.remove('perf-off');
+            this._container.classList.add('perf-on');
         }
     }
 
-    show() { this._visible = true; if (this._container) this._container.style.display = 'flex'; }
-    hide() { this._visible = false; if (this._container) this._container.style.display = 'none'; }
+    hide() {
+        this._visible = false;
+        if (this._container) {
+            this._container.classList.remove('perf-on');
+            this._container.classList.add('perf-off');
+        }
+    }
 }
 
 const perfMonitor = new PerfMonitor();

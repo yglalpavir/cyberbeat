@@ -1990,11 +1990,12 @@ html.is-touch .lb-detail-header {
    ============================================================ */
 #perfMonitor {
     position: fixed;
-    top: 8px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    top: auto;
     z-index: 100;
-    display: flex;
+    /* 只在对局中显示：菜单/设置/结算不需要 FPS 覆盖层（按 ` 可手动强制显示） */
+    display: none;
     gap: 12px;
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(8px);
@@ -2003,6 +2004,15 @@ html.is-touch .lb-detail-header {
     border: 1px solid rgba(255, 255, 255, 0.1);
     font-family: var(--font-mono);
     pointer-events: none;
+}
+
+body.game-active #perfMonitor:not(.perf-off) {
+    display: flex;
+}
+
+/* 手动强制显示（菜单里按 ` 打开时） */
+#perfMonitor.perf-on {
+    display: flex;
 }
 
 .perf-item {
@@ -2776,7 +2786,16 @@ html.is-touch .mobile-btn::before {
    手机竖屏 (< 768px)
    ============================================================ */
 @media (max-width: 768px) and (orientation: portrait) {
-    #perfMonitor { top: auto; bottom: 100px; font-size: 0.6rem; padding: 3px 10px; gap: 8px; }
+    #perfMonitor {
+        top: auto;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 100px);
+        left: 10px;
+        right: auto;
+        transform: none;
+        font-size: 0.6rem;
+        padding: 3px 10px;
+        gap: 8px;
+    }
 
     html { font-size: 15px; }
 
@@ -3192,10 +3211,10 @@ html.is-touch .mobile-btn::before {
     .mobile-btns { height: 52px; gap: 4px; max-width: 100%; }
     .mobile-btn { font-size: 1rem; min-height: 46px; }
 
-    /* 性能面板：挪到左上角 HUD 下方，避免压住分数 */
+    /* 性能面板：放在轨道区左侧的空白处（触控栏居中，左侧不会被挡） */
     #perfMonitor {
-        top: calc(env(safe-area-inset-top, 0px) + 112px);
-        bottom: auto;
+        top: auto;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 68px);
         left: 8px;
         transform: none;
         font-size: 0.5rem;
@@ -3236,7 +3255,7 @@ html.is-pointer-fine body.game-active:not(.paused) {
     .mobile-btns { height: 66px; gap: 4px; }
     .mobile-btn { font-size: 1.2rem; border-radius: 10px; min-height: 54px; }
 
-    #perfMonitor { bottom: 78px; }
+    #perfMonitor { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
 
     .logo { font-size: 1.2rem; }
     .start-sidebar { padding: 10px 8px; }
@@ -3271,7 +3290,10 @@ html.is-pointer-fine body.game-active:not(.paused) {
     .start-sidebar { width: 230px; }
 
     #perfMonitor {
-        top: 6px;
+        top: auto;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 100px);
+        left: 12px;
+        transform: none;
         font-size: 0.7rem;
         padding: 5px 16px;
     }
