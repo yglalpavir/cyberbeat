@@ -148,6 +148,10 @@ class UIManager {
         this.pauseResumeBtn  = document.getElementById('pauseResumeBtn');
         this.pauseRetryBtn   = document.getElementById('pauseRetryBtn');
         this.pauseHomeBtn    = document.getElementById('pauseHomeBtn');
+        this.pauseSongTitle  = document.getElementById('pauseSongTitle');
+        this.pauseScore      = document.getElementById('pauseScore');
+        this.pauseAcc        = document.getElementById('pauseAcc');
+        this.pauseCombo      = document.getElementById('pauseCombo');
     }
 
     // ========== 事件绑定 ==========
@@ -482,14 +486,33 @@ class UIManager {
 
     _setPauseOverlayVisible(visible) {
         this._pauseOverlayVisible = visible;
+        document.body.classList.toggle('paused', visible);
         if (this.pauseOverlay) {
             this.pauseOverlay.classList.toggle('hidden', !visible);
         }
         if (visible) {
             this.setSkipIntroVisible(false);
+            this._updatePauseStats();
         }
         if (this.gamePauseBtn) {
             this.gamePauseBtn.classList.toggle('hidden', visible || gameState.screen !== 'game');
+        }
+    }
+
+    /** 刷新暂停面板中的曲目与实时成绩 */
+    _updatePauseStats() {
+        const info = renderer && renderer._songInfo;
+        if (this.pauseSongTitle) {
+            this.pauseSongTitle.textContent = (info && info.title) || selectedSongDisplayName || '—';
+        }
+        if (this.pauseScore) {
+            this.pauseScore.textContent = gameState.calculateFinalScore().finalScore.toLocaleString();
+        }
+        if (this.pauseAcc) {
+            this.pauseAcc.textContent = gameState.calculateTotalAcc().toFixed(2) + '%';
+        }
+        if (this.pauseCombo) {
+            this.pauseCombo.textContent = String(gameState.combo);
         }
     }
 
@@ -1901,6 +1924,22 @@ class UIManager {
         // 重置游戏状态
         gameState.reset();
 
+        // 顶部 HUD 曲目信息
+        if (renderer) {
+            const chart = getLoadedChartData();
+            const difficultyLabel = chart
+                ? (chart.meta.version || 'CHART')
+                : (selectedDifficulty || 'normal').toUpperCase();
+            const artist = selectedLibrarySong && selectedLibrarySong.artist
+                ? selectedLibrarySong.artist
+                : (selectedSongSource === 'import' ? 'CUSTOM IMPORT' : '');
+            renderer.setSongInfo({
+                title: selectedSongDisplayName || 'UNKNOWN',
+                artist,
+                difficulty: difficultyLabel
+            });
+        }
+
         // 重置渲染器对象池
         if (renderer) renderer.resetPools();
 
@@ -2850,6 +2889,8 @@ class UIManager {
                 note.holdActive = true;
                 note.startTime = currentTime;   // 记录命中时刻，用于按住进度渐变
                 const isPerfect = timeDiff <= perfectWindow;
+                gameState.lastHitOffset = currentTime - noteTime;
+                gameState.lastHitAt = performance.now();
                 activeHolds[track] = note;
                 // 存储头部判定结果，用于后续提前松开时修正计数
                 note._headWasPerfect = isPerfect;
@@ -2877,6 +2918,8 @@ class UIManager {
             // ===== Tap 音符 =====
             note.hit = true;
             const isPerfect = timeDiff <= perfectWindow;
+            gameState.lastHitOffset = currentTime - noteTime;
+            gameState.lastHitAt = performance.now();
 
             if (isPerfect) {
                 gameState.perfect++;

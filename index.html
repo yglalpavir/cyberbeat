@@ -41,7 +41,12 @@
     <div id="pauseOverlay" class="pause-overlay hidden">
         <div class="pause-card">
             <div class="pause-title">PAUSED</div>
-            <div class="pause-sub">游戏已暂停</div>
+            <div class="pause-song" id="pauseSongTitle">—</div>
+            <div class="pause-stats">
+                <div class="pause-stat"><span>SCORE</span><b id="pauseScore">0</b></div>
+                <div class="pause-stat"><span>ACC</span><b id="pauseAcc">100.00%</b></div>
+                <div class="pause-stat"><span>COMBO</span><b id="pauseCombo">0</b></div>
+            </div>
             <div class="pause-actions">
                 <button class="btn btn-primary" id="pauseResumeBtn" type="button">▶ RESUME</button>
                 <button class="btn btn-secondary" id="pauseRetryBtn" type="button">↻ RETRY</button>

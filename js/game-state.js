@@ -36,6 +36,9 @@ class GameState {
         this.pauseSnapshotTime = 0;    // 暂停时的场景时间（ms）
         // 恢复倒计时（暂停后重新开始前给玩家缓冲）
         this.resumeCountdownUntil = 0; // performance.now() 时间戳；为 0 表示无恢复倒计时
+        // 最近一次打击的时序偏差（ms，负=偏早，正=偏晚），用于游玩界面判定偏移条
+        this.lastHitOffset = 0;
+        this.lastHitAt = 0;            // performance.now() 时间戳
     }
 
     /**

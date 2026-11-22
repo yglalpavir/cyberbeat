@@ -1096,6 +1096,27 @@ html.is-touch .touch-offset-hint {
     html.is-touch .lb-io .btn-sm {
         min-height: 40px;
     }
+
+    /* 横屏矮窗口：暂停卡片紧凑化（曲目 + 成绩 + 三个按钮仍可见） */
+    .pause-overlay {
+        padding: 12px;
+        align-items: flex-start;
+    }
+
+    .pause-card {
+        max-width: 460px;
+        max-height: calc(100dvh - 24px);
+        padding: 14px 18px 12px;
+        gap: 7px;
+    }
+
+    .pause-title { font-size: 1.15rem; }
+    .pause-song { font-size: 0.72rem; }
+    .pause-stats { margin: 0; gap: 6px; }
+    .pause-stat { padding: 5px 4px; }
+    .pause-stat b { font-size: 0.8rem; }
+    .pause-actions { gap: 6px; margin-top: 0; }
+    .pause-actions .btn { padding: 9px 14px; min-height: 36px; font-size: 0.75rem; }
 }
 
 /* ===== 开关 (Toggle Switch) ===== */
@@ -1923,29 +1944,50 @@ html.is-touch .lb-detail-header {
     position: fixed;
     top: calc(env(safe-area-inset-top, 0px) + 12px);
     right: calc(env(safe-area-inset-right, 0px) + 12px);
-    width: 46px;
-    height: 46px;
-    border-radius: 50%;
-    background: rgba(22, 22, 31, 0.78);
-    border: 1px solid var(--border-medium);
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgba(10, 10, 18, 0.58);
+    border: 1px solid rgba(255, 255, 255, 0.14);
     color: var(--text-primary);
-    font-size: 1.15rem;
     font-family: var(--font-family);
     z-index: 30;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: transform var(--transition-fast), background var(--transition-fast);
+    transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+/* 用两条竖线绘制更利落的暂停图标 */
+.game-pause-btn span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0;
+    line-height: 0;
+}
+
+.game-pause-btn span::before,
+.game-pause-btn span::after {
+    content: '';
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.92);
 }
 
 .game-pause-btn:active {
-    transform: scale(0.9);
-    background: rgba(40, 40, 56, 0.9);
+    transform: scale(0.94);
+    background: rgba(30, 30, 44, 0.9);
+    border-color: rgba(255, 255, 255, 0.28);
 }
 
 /* 暂停按钮仅触屏设备显示（桌面使用 ESC / P 键） */
@@ -1960,27 +2002,30 @@ html.is-touch body.game-active .game-pause-btn {
     left: 50%;
     transform: translateX(-50%);
     z-index: 30;
-    padding: 10px 24px;
+    padding: 9px 22px;
     font-family: var(--font-family);
-    font-size: 0.8rem;
+    font-size: 0.72rem;
     font-weight: 700;
-    letter-spacing: 1.5px;
-    color: #fff;
-    background: rgba(22, 22, 31, 0.8);
-    border: 1px solid rgba(77, 171, 247, 0.45);
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(10, 10, 18, 0.66);
+    border: 1px solid rgba(77, 171, 247, 0.38);
     border-radius: 999px;
     cursor: pointer;
-    animation: pulseSoft 1.6s ease-in-out infinite;
+    animation: pulseSoft 1.8s ease-in-out infinite;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     user-select: none;
     -webkit-user-select: none;
-    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4), inset 0 0 18px rgba(77, 171, 247, 0.08);
 }
 
 .skip-intro-btn:active {
-    transform: translateX(-50%) scale(0.95);
-    background: rgba(77, 171, 247, 0.25);
+    transform: translateX(-50%) scale(0.96);
+    background: rgba(77, 171, 247, 0.22);
+    border-color: rgba(77, 171, 247, 0.7);
 }
 
 @keyframes pulseSoft {
@@ -2156,6 +2201,11 @@ html.is-touch body.game-active .skip-intro-btn:not(.hidden) {
     display: block;
 }
 
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 .pause-overlay {
     position: fixed;
     inset: 0;
@@ -2164,44 +2214,104 @@ html.is-touch body.game-active .skip-intro-btn:not(.hidden) {
     align-items: center;
     justify-content: center;
     padding: 20px;
-    /* 画布内已绘制压暗遮罩，这里仅提供卡片容器 */
+    /* 冻结场景保持可见：整层压暗 + 毛玻璃，卡片再叠一层实底 */
+    background: rgba(4, 4, 10, 0.62);
+    backdrop-filter: blur(12px) saturate(0.85);
+    -webkit-backdrop-filter: blur(12px) saturate(0.85);
+    animation: fadeIn 0.18s ease;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .pause-card {
+    position: relative;
     width: 100%;
-    max-width: 340px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-medium);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
-    padding: 28px 24px;
+    max-width: 380px;
+    /* 矮窗口（横屏手机）下卡片可滚动，避免按钮被裁掉 */
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: linear-gradient(180deg, rgba(24, 24, 36, 0.98), rgba(13, 13, 21, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    padding: 26px 24px 22px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
     text-align: center;
     animation: fadeScale 0.25s ease;
 }
 
-.pause-title {
-    font-size: 1.4rem;
-    font-weight: 800;
-    letter-spacing: 3px;
-    background: linear-gradient(135deg, var(--accent), var(--purple));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+/* 顶部一道极细的霓虹高光 */
+.pause-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 18%;
+    right: 18%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(77, 171, 247, 0.85), transparent);
 }
 
-.pause-sub {
+.pause-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: 0.32em;
+    text-indent: 0.32em;
+    color: #fff;
+    background: none;
+    -webkit-text-fill-color: #fff;
+    text-shadow: 0 0 26px rgba(77, 171, 247, 0.35);
+}
+
+.pause-song {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.4px;
     color: var(--text-secondary);
+}
+
+.pause-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 4px 0 2px;
+}
+
+.pause-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 9px 6px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+}
+
+.pause-stat span {
+    font-size: 0.52rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--text-tertiary);
+}
+
+.pause-stat b {
+    font-family: var(--font-mono);
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text-primary);
 }
 
 .pause-actions {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-top: 6px;
+    gap: 8px;
+    margin-top: 2px;
 }
 
 .pause-hint {
@@ -2228,6 +2338,7 @@ html.is-touch .pause-hint {
     z-index: 20;
     pointer-events: none;
     padding: env(safe-area-inset-bottom, 10px) 6px 8px 6px;
+    background: linear-gradient(to top, rgba(5, 5, 10, 0.88) 0%, rgba(5, 5, 10, 0.5) 58%, rgba(5, 5, 10, 0) 100%);
 }
 
 body.game-active #mobileControls {
@@ -2241,10 +2352,14 @@ body.game-active #mobileControls {
     height: 80px;
     pointer-events: auto;
     width: 100%;
+    max-width: var(--playfield-width, 380px);
+    margin: 0 auto;
     padding: 2px;
 }
 
 .mobile-btn {
+    --lane: #4dabf7;
+    --lane-rgb: 77, 171, 247;
     flex: 1;
     display: flex;
     align-items: center;
@@ -2253,10 +2368,12 @@ body.game-active #mobileControls {
     font-size: 1.4rem;
     font-weight: 700;
     color: #fff;
-    border: 2px solid transparent;
-    border-radius: var(--radius-md);
+    background: linear-gradient(180deg, rgba(var(--lane-rgb), 0.2) 0%, rgba(10, 10, 18, 0.82) 58%);
+    border: 1px solid rgba(var(--lane-rgb), 0.32);
+    border-top: 2px solid rgba(var(--lane-rgb), 0.9);
+    border-radius: 12px;
     cursor: pointer;
-    transition: transform 0.08s ease, opacity 0.1s, box-shadow 0.1s;
+    transition: transform 0.07s ease, box-shadow 0.1s ease, background 0.1s ease, border-color 0.1s ease;
     -webkit-tap-highlight-color: transparent;
     /* manipulation 仍会延迟 click，游戏按键需要即时响应 */
     touch-action: none;
@@ -2267,22 +2384,26 @@ body.game-active #mobileControls {
     overflow: hidden;
     /* 底部与手势条保持距离，手指按压区域更大 */
     min-height: 64px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 4px 14px rgba(0, 0, 0, 0.32);
 }
 
 .mobile-btn::after {
     content: '';
     position: absolute;
     inset: 0;
-    background: rgba(255, 255, 255, 0.15);
+    background: radial-gradient(circle at 50% 100%, rgba(var(--lane-rgb), 0.38), transparent 70%);
     opacity: 0;
     transition: opacity 0.1s;
     border-radius: inherit;
+    pointer-events: none;
 }
 
 .mobile-btn:active,
 .mobile-btn.active {
-    transform: scale(0.93);
-    opacity: 0.85;
+    transform: translateY(1px) scale(0.985);
+    background: linear-gradient(180deg, rgba(var(--lane-rgb), 0.5) 0%, rgba(var(--lane-rgb), 0.14) 100%);
+    border-color: rgba(var(--lane-rgb), 0.95);
+    box-shadow: 0 0 22px rgba(var(--lane-rgb), 0.42), inset 0 0 20px rgba(var(--lane-rgb), 0.22);
 }
 
 .mobile-btn:active::after,
@@ -2290,20 +2411,21 @@ body.game-active #mobileControls {
     opacity: 1;
 }
 
-.mobile-btn:nth-child(1) { background: #4dabf7; border-color: rgba(77, 171, 247, 0.5); }
-.mobile-btn:nth-child(2) { background: #69db7c; border-color: rgba(105, 219, 124, 0.5); }
-.mobile-btn:nth-child(3) { background: #ff6b6b; border-color: rgba(255, 107, 107, 0.5); }
-.mobile-btn:nth-child(4) { background: #ffd43b; color: #000; border-color: rgba(255, 212, 59, 0.5); }
+.mobile-btn:nth-child(1) { --lane: #4dabf7; --lane-rgb: 77, 171, 247; }
+.mobile-btn:nth-child(2) { --lane: #69db7c; --lane-rgb: 105, 219, 124; }
+.mobile-btn:nth-child(3) { --lane: #ff6b6b; --lane-rgb: 255, 107, 107; }
+.mobile-btn:nth-child(4) { --lane: #ffd43b; --lane-rgb: 255, 212, 59; }
 
 /* 移动端提示标签 (显示按键字母) */
 .mobile-btn::before {
     content: attr(data-track-label);
     position: absolute;
-    top: 4px;
+    top: 5px;
     font-size: 0.55rem;
-    font-weight: 400;
-    opacity: 0.5;
+    font-weight: 500;
+    opacity: 0.45;
     letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* 纯触屏设备：隐藏键盘字母，放大居中轨道数字 */
@@ -2314,10 +2436,12 @@ html.is-touch .mobile-btn {
 html.is-touch .mobile-btn::before {
     position: static;
     transform: translateY(0);
-    font-size: 1.35rem;
+    font-size: 1.3rem;
     font-weight: 700;
-    opacity: 0.9;
+    opacity: 0.92;
     letter-spacing: 0;
+    color: #fff;
+    text-shadow: 0 0 14px rgba(var(--lane-rgb), 0.65);
 }
 
 /* ============================================================
@@ -2708,6 +2832,11 @@ html.is-touch .mobile-btn::before {
 /* 非触屏设备（鼠标精确指针）永不显示触控键，即使窗口矮/窄 */
 html.is-pointer-fine body.game-active #mobileControls { display: none; }
 html.is-pointer-fine .game-pause-btn { display: none; }
+
+/* 游玩中隐藏鼠标指针，减少视觉干扰；暂停时恢复 */
+html.is-pointer-fine body.game-active:not(.paused) {
+    cursor: none;
+}
 
 /* ============================================================
    响应式 - 小手机竖屏 (< 380px)

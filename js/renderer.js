@@ -1,5 +1,8 @@
 // ==================== Canvas 渲染器 (性能优化版) ====================
 
+const HUD_FONT_STACK = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`;
+const HUD_MONO_STACK = `'SF Mono', 'Cascadia Mono', 'Fira Code', Consolas, monospace`;
+
 class Renderer {
     constructor(canvas, ctx) {
         this.canvas = canvas;
@@ -15,11 +18,22 @@ class Renderer {
         this._safeLeft = 0;
         this._controlsHeight = 0;
 
+        // 游玩界面视觉状态
+        this._laneFlash = [0, 0, 0, 0];        // 命中/漏击时的轨道闪光强度 0~1
+        this._laneFlashColor = TRACK_COLORS.slice(); // 闪光颜色（命中=轨道色，漏击=红色）
+        this._hitPulse = 0;                    // 判定线命中脉冲 0~1
+        this._comboPop = 0;                    // 连击数字弹跳动画 0~1
+        this._lastCombo = 0;
+        this._songInfo = null;                 // { title, artist, difficulty }
+
         // 预计算轨道坐标
         this.trackPositions = [];   // [{x, cx, hitX, hitW}]
 
         // 缓存背景
         this._bgGradient = null;
+        this._bgVignette = null;
+        this._laneFieldGradient = null;
+        this._dangerVignette = null;
         this._bgCacheWidth = 0;
         this._bgCacheHeight = 0;
 
@@ -94,6 +108,12 @@ class Renderer {
         const totalTrackWidth = CONFIG.trackCount * CONFIG.trackWidth + (CONFIG.trackCount - 1) * CONFIG.trackSpacing;
         this.trackStartX = (this.canvasWidth - totalTrackWidth) / 2;
 
+        // playfield 两侧留白：桌面 12px，窄屏按剩余空间收缩，保证不超出画布
+        this._fieldPad = Math.min(12, Math.max(0, (this.canvasWidth - totalTrackWidth) / 2 - 2));
+
+        // 让底部触控键与 playfield 同宽（CSS 读取此变量）
+        document.documentElement.style.setProperty('--playfield-width', (totalTrackWidth + this._fieldPad * 2) + 'px');
+
         // 预计算轨道坐标
         this.trackPositions.length = 0;
         for (let i = 0; i < CONFIG.trackCount; i++) {
@@ -130,8 +150,16 @@ class Renderer {
 
         // 清除缓存
         this._bgGradient = null;
+        this._bgVignette = null;
+        this._laneFieldGradient = null;
+        this._dangerVignette = null;
 
         this.ctx.imageSmoothingEnabled = false;
+    }
+
+    /** 设置游戏内顶部显示的曲目信息（开始游戏时由 UI 调用） */
+    setSongInfo(info) {
+        this._songInfo = info || null;
     }
 
     // ========== 背景 (缓存渐变) ==========
@@ -148,29 +176,153 @@ class Renderer {
 
         ctx.fillStyle = this._bgGradient;
         ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
+
+        // 暗角：把视觉焦点收拢到轨道区域，减少边缘干扰
+        if (!this._bgVignette) {
+            const w = this.canvasWidth;
+            const h = this.canvasHeight;
+            const g = ctx.createRadialGradient(
+                w / 2, h * 0.44, Math.min(w, h) * 0.12,
+                w / 2, h * 0.5, Math.max(w, h) * 0.72
+            );
+            g.addColorStop(0, 'rgba(0,0,0,0)');
+            g.addColorStop(0.62, 'rgba(0,0,0,0.18)');
+            g.addColorStop(1, 'rgba(0,0,0,0.58)');
+            this._bgVignette = g;
+        }
+        ctx.fillStyle = this._bgVignette;
+        ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
     }
 
     // ========== 轨道 (批量绘制) ==========
     drawTracks() {
         const ctx = this.ctx;
         const positions = this.trackPositions;
+        const trackW = CONFIG.trackWidth;
+        const h = this.canvasHeight;
+        const judgmentY = this._judgmentY;
+        const totalWidth = trackW * CONFIG.trackCount + CONFIG.trackSpacing * (CONFIG.trackCount - 1);
+        const fieldX = this.trackStartX - this._fieldPad;
+        const fieldW = totalWidth + this._fieldPad * 2;
+        const scale = this._dt / 16.67;
 
-        // 所有虚线一次绘制
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        // 命中闪光 / 判定线脉冲衰减
+        for (let i = 0; i < this._laneFlash.length; i++) {
+            if (this._laneFlash[i] > 0) {
+                this._laneFlash[i] = Math.max(0, this._laneFlash[i] - 0.075 * scale);
+            }
+        }
+        if (this._hitPulse > 0) this._hitPulse = Math.max(0, this._hitPulse - 0.08 * scale);
+
+        // 专用 playfield 底：顶部渐隐，底部略暗
+        if (!this._laneFieldGradient) {
+            const g = ctx.createLinearGradient(0, 0, 0, h);
+            g.addColorStop(0, 'rgba(8, 8, 15, 0)');
+            g.addColorStop(0.16, 'rgba(8, 8, 15, 0.42)');
+            g.addColorStop(0.72, 'rgba(8, 8, 15, 0.58)');
+            g.addColorStop(1, 'rgba(5, 5, 10, 0.72)');
+            this._laneFieldGradient = g;
+        }
+        ctx.fillStyle = this._laneFieldGradient;
+        ctx.fillRect(fieldX, 0, fieldW, h);
+
+        // 交替轨道底色，增强 4K 轨道辨识度
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.018)';
+        for (let i = 1; i < positions.length; i += 2) {
+            ctx.fillRect(positions[i].x, 0, trackW, h);
+        }
+
+        // 按下 / 命中光柱
+        for (let i = 0; i < positions.length; i++) {
+            const pressed = gameState.pressedKeys.has(KEYS[i]);
+            const flash = this._laneFlash[i];
+            if (!pressed && flash <= 0.01) continue;
+            const color = pressed ? TRACK_COLORS[i] : this._laneFlashColor[i];
+            const intensity = Math.max(pressed ? 0.17 : 0, flash * 0.42);
+            const glowH = Math.min(h * 0.55, 260);
+            const g = ctx.createLinearGradient(0, judgmentY - glowH, 0, judgmentY);
+            g.addColorStop(0, _withAlpha(color, 0));
+            g.addColorStop(1, _withAlpha(color, intensity));
+            ctx.fillStyle = g;
+            ctx.fillRect(positions[i].x, judgmentY - glowH, trackW, glowH);
+            ctx.fillStyle = _withAlpha(color, intensity * 0.35);
+            ctx.fillRect(positions[i].x, judgmentY, trackW, 44);
+        }
+
+        // 轨道分隔线
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.055)';
         ctx.lineWidth = 1;
-        ctx.setLineDash([4, 12]);
         ctx.beginPath();
         for (let i = 0; i < positions.length; i++) {
-            ctx.moveTo(positions[i].x, 0);
-            ctx.lineTo(positions[i].x, this.canvasHeight);
+            const x = positions[i].x;
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.moveTo(x + trackW, 0);
+            ctx.lineTo(x + trackW, h);
         }
         ctx.stroke();
-        ctx.setLineDash([]);
 
-        // 判定线
-        const totalWidth = CONFIG.trackWidth * CONFIG.trackCount + CONFIG.trackSpacing * (CONFIG.trackCount - 1);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.fillRect(this.trackStartX - 10, this._judgmentY - 1, totalWidth + 20, 2);
+        // playfield 外框
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+        ctx.fillRect(fieldX, 0, 1, h);
+        ctx.fillRect(fieldX + fieldW - 1, 0, 1, h);
+
+        // 判定线：外层光晕 + 轨道色段 + 白色核心
+        const pulse = this._hitPulse;
+        ctx.fillStyle = `rgba(255, 255, 255, ${(0.045 + pulse * 0.07).toFixed(3)})`;
+        ctx.fillRect(fieldX, judgmentY - 7, fieldW, 14);
+
+        for (let i = 0; i < positions.length; i++) {
+            const pressed = gameState.pressedKeys.has(KEYS[i]);
+            ctx.fillStyle = _withAlpha(TRACK_COLORS[i], pressed ? 0.85 : 0.3);
+            ctx.fillRect(positions[i].x + 1, judgmentY - 1, trackW - 2, 2);
+        }
+
+        ctx.fillStyle = `rgba(255, 255, 255, ${(0.55 + pulse * 0.45).toFixed(3)})`;
+        ctx.fillRect(fieldX, judgmentY + 0.5, fieldW, 1.5);
+
+        // 判定线上的键位接收器（Key Cap）
+        for (let i = 0; i < positions.length; i++) {
+            const pressed = gameState.pressedKeys.has(KEYS[i]);
+            const cx = positions[i].cx;
+            const capW = trackW - 14;
+            const capX = cx - capW / 2;
+            const color = TRACK_COLORS[i];
+
+            if (pressed) {
+                ctx.globalAlpha = 0.28;
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.roundRect(capX - 4, judgmentY - 8, capW + 8, 16, 8);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+
+            ctx.globalAlpha = pressed ? 1 : 0.38;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(capX, judgmentY - 3, capW, 6, 3);
+            ctx.fill();
+
+            ctx.globalAlpha = pressed ? 0.65 : 0.22;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.roundRect(capX + 2, judgmentY - 2.5, capW - 4, 2, 1);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
+        // 桌面端在判定线下方显示键位提示
+        if (!IS_TOUCH_DEVICE) {
+            const s = this._hudScale;
+            ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.24)';
+            for (let i = 0; i < positions.length; i++) {
+                ctx.fillText(TRACK_KEYS[i], positions[i].cx, judgmentY + 20 * s);
+            }
+        }
     }
 
     // ========== 音符绘制 (可见性裁剪 + 精确几何提前终止) ==========
@@ -331,7 +483,7 @@ class Renderer {
                 // 进度从头部开始累积，用垂直渐变表达：越接近判定线越亮
                 const grad = ctx.createLinearGradient(0, bodyTop, 0, yBottom);
                 const litAlpha = Math.min(0.95, 0.45 + holdProgress * 0.5);
-                grad.addColorStop(0, _withAlpha(color, 0.45));
+                grad.addColorStop(0, _withAlpha(color, 0.4));
                 grad.addColorStop(1, _withAlpha(color, litAlpha));
                 ctx.globalAlpha = 1;
                 ctx.fillStyle = grad;
@@ -339,10 +491,27 @@ class Renderer {
                 ctx.globalAlpha = alpha;
                 ctx.fillStyle = color;
             }
-            ctx.fillRect(bodyX, bodyTop, bodyW, bodyHeight);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-            ctx.fillRect(bodyX, bodyTop, 3, bodyHeight);
-            ctx.fillRect(bodyX + bodyW - 3, bodyTop, 3, bodyHeight);
+
+            ctx.beginPath();
+            ctx.roundRect(bodyX, bodyTop, bodyW, bodyHeight, 4);
+            ctx.fill();
+
+            // 内部高光条 + 中央细线，长条更有材质感
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+            ctx.fillRect(bodyX + 3, bodyTop, 3, bodyHeight);
+            ctx.fillRect(bodyX + bodyW - 6, bodyTop, 3, bodyHeight);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.fillRect(bodyX + bodyW / 2 - 1, bodyTop, 2, bodyHeight);
+
+            // 按住中：判定线附近额外亮起，强调持续输入
+            if (isActive) {
+                const glowH = Math.min(80, bodyHeight);
+                const glow = ctx.createLinearGradient(0, yBottom - glowH, 0, yBottom);
+                glow.addColorStop(0, _withAlpha(color, 0));
+                glow.addColorStop(1, _withAlpha(color, 0.35));
+                ctx.fillStyle = glow;
+                ctx.fillRect(bodyX, yBottom - glowH, bodyW, glowH);
+            }
             ctx.globalAlpha = 1.0;
         }
 
@@ -368,20 +537,65 @@ class Renderer {
         const h = 24;
 
         if (noteStyle === 'orb') {
-            const radius = CONFIG.trackWidth * 0.475;
+            const radius = CONFIG.trackWidth * 0.45;
             const cx = x + CONFIG.trackWidth / 2;
             const cy = y + h / 2;
+
+            // 外圈柔光
+            ctx.globalAlpha = 0.16;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius + 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
+            // 主体
             ctx.fillStyle = color;
             ctx.beginPath();
             ctx.arc(cx, cy, radius, 0, Math.PI * 2);
             ctx.fill();
+
+            // 顶部高光 + 白色描边，提升立体感
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
+            ctx.beginPath();
+            ctx.arc(cx - radius * 0.16, cy - radius * 0.2, radius * 0.58, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius - 0.75, 0, Math.PI * 2);
+            ctx.stroke();
         } else {
+            const nx = x + 2;
+
+            // 外圈柔光
+            ctx.globalAlpha = 0.14;
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.roundRect(x + 2, y, w, h, 6);
+            ctx.roundRect(nx - 2, y - 2, w + 4, h + 4, 8);
             ctx.fill();
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-            ctx.fillRect(x + 2, y, w, 3);
+            ctx.globalAlpha = 1;
+
+            // 主体
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(nx, y, w, h, 6);
+            ctx.fill();
+
+            // 顶部高光 + 底部暗边
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+            ctx.beginPath();
+            ctx.roundRect(nx + 2, y + 2, w - 4, 6, 3);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+            ctx.fillRect(nx + 2, y + h - 4, w - 4, 2);
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(nx + 0.5, y + 0.5, w - 1, h - 1, 5.5);
+            ctx.stroke();
         }
     }
 
@@ -391,36 +605,67 @@ class Renderer {
         if (secondsLeft <= 0) return;
         const ctx = this.ctx;
         const s = this._hudScale;
-        const centerX = this.canvasWidth / 2;
-        const centerY = this.canvasHeight / 2 - 30 * s;
-        const radius = (resumeMode ? 44 : 55) * Math.max(0.85, s);
-        const fontSize = (resumeMode ? 42 : 52) * Math.max(0.85, s);
+        const w = this.canvasWidth;
+        const h = this.canvasHeight;
+        const centerX = w / 2;
+        const centerY = h * 0.46;
+        const color = resumeMode ? '#69db7c' : '#4dabf7';
+        const frac = secondsLeft - Math.floor(secondsLeft);
+        const radius = (resumeMode ? 46 : 58) * Math.max(0.85, s) * (1 + frac * 0.045);
+        const fontSize = (resumeMode ? 44 : 56) * Math.max(0.85, s);
 
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.save();
+
+        // 倒计时期间压暗画面，把注意力集中到中央
+        ctx.fillStyle = 'rgba(4, 4, 10, 0.42)';
+        ctx.fillRect(0, 0, w, h);
+
+        // 外圈柔光
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, radius + 5, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, radius + 10, 0, Math.PI * 2);
         ctx.fill();
+        ctx.globalAlpha = 1;
 
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(Math.ceil(secondsLeft).toString(), centerX, centerY + 2);
-
-        ctx.strokeStyle = resumeMode ? '#69db7c' : '#4dabf7';
-        ctx.lineWidth = 4;
+        // 底环
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 5 * s;
         ctx.beginPath();
-        const progress = 1 - (secondsLeft / (CONFIG.countdownDuration / 1000));
-        ctx.arc(centerX, centerY, radius - 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
         ctx.stroke();
 
-        // 恢复模式提示文字
-        if (resumeMode) {
-            ctx.font = `bold ${13 * Math.max(0.85, s)}px sans-serif`;
-            ctx.fillStyle = '#69db7c';
-            ctx.fillText('READY', centerX, centerY + radius + 22 * s);
-        }
+        // 进度环
+        const progress = Math.max(0, Math.min(1, 1 - (secondsLeft / (CONFIG.countdownDuration / 1000))));
+        ctx.strokeStyle = color;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 16 * s;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.lineCap = 'butt';
+
+        // 数字
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `800 ${fontSize}px ${HUD_MONO_STACK}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 18 * s;
+        ctx.fillText(Math.ceil(secondsLeft).toString(), centerX, centerY + 2 * s);
+        ctx.shadowBlur = 0;
+
+        // 状态标签
+        ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fillText(resumeMode ? 'R E S U M E' : 'G E T   R E A D Y', centerX, centerY - radius - 24 * s);
+        ctx.fillStyle = color;
+        ctx.fillText(resumeMode ? 'BACK IN' : 'STAY ON BEAT', centerX, centerY + radius + 26 * s);
+
         ctx.textAlign = 'left';
+        ctx.restore();
     }
 
     // ========== 激光 (对象池) ==========
@@ -459,6 +704,11 @@ class Renderer {
         l.alpha = 0.8;
         l.active = true;
         l.timeElapsed = 0;
+
+        // 命中反馈：轨道光柱 + 判定线脉冲
+        this._laneFlash[track] = 1;
+        this._laneFlashColor[track] = TRACK_COLORS[track];
+        this._hitPulse = 1;
     }
 
     drawLasers() {
@@ -603,6 +853,10 @@ class Renderer {
         j.text = 'MISS'; j.y = this._judgmentY - 40; j.track = track;
         j.alpha = 1; j.bounce = 1.0; j.active = true;
         j.timeElapsed = 0;
+
+        // 漏击：轨道短暂泛红提示
+        this._laneFlash[track] = 0.85;
+        this._laneFlashColor[track] = '#ff6b6b';
     }
 
     drawJudgments() {
@@ -630,12 +884,19 @@ class Renderer {
             pool[validCount++] = j;
 
             const x = positions[j.track].cx;
+            const isPerfect = j.text === 'PERFECT';
+            const isGreat = j.text === 'GREAT';
+            const color = isPerfect ? '#ffd43b' : isGreat ? '#69db7c' : '#ff6b6b';
+            const baseSize = isPerfect ? 17 : isGreat ? 15 : 16;
             ctx.globalAlpha = j.alpha;
-            ctx.font = `bold ${Math.round(14 * j.bounce)}px sans-serif`;
+            ctx.font = `800 ${Math.round(baseSize * this._hudScale * j.bounce)}px ${HUD_FONT_STACK}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = j.text === 'PERFECT' ? '#ffd43b' : j.text === 'GREAT' ? '#69db7c' : '#ff6b6b';
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12 * this._hudScale;
             ctx.fillText(j.text, x, j.y);
+            ctx.shadowBlur = 0;
         }
         this._judgmentPoolIdx = validCount;
         ctx.globalAlpha = 1.0;
@@ -645,62 +906,286 @@ class Renderer {
     drawHUD() {
         const ctx = this.ctx;
         const s = this._hudScale;
+        const w = this.canvasWidth;
+        const h = this.canvasHeight;
+        const now = performance.now();
+        // 暂停 / 恢复倒计时期间：进度按冻结时刻显示，避免进度条倒计时中前跳
+        const frozen = gameState.paused || gameState.resumeCountdownUntil > 0;
+        const currentTime = frozen
+            ? (gameState.pauseSnapshotTime || 0)
+            : Math.max(0, now - gameState.startTime);
+        const scale = this._dt / 16.67;
+
+        // 连击弹跳动画状态
+        if (gameState.combo > this._lastCombo) this._comboPop = 1;
+        if (gameState.combo <= 0) this._comboPop = 0;
+        this._lastCombo = gameState.combo;
+        if (this._comboPop > 0) this._comboPop = Math.max(0, this._comboPop - 0.07 * scale);
+
         // 矮窗口（横屏手机）时性能面板固定在左上，HUD 整体下移避让
-        const perfAvoid = (this.canvasHeight <= 520 && IS_TOUCH_DEVICE) ? 26 : 0;
-        const left = this._safeLeft + 30 * s;
-        const top = this._safeTop + (30 + perfAvoid) * s;
+        const perfAvoid = (h <= 520 && IS_TOUCH_DEVICE) ? 26 : 0;
+        const left = this._safeLeft + 26 * s;
+        const top = this._safeTop + (22 + perfAvoid) * s;
+
         ctx.save();
 
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${14 * s}px sans-serif`;
+        // ---- 顶部歌曲进度条 ----
+        this._drawProgressBar(currentTime);
+
+        // ---- 低血量红色暗角 ----
+        const healthInitial = CONFIG.health.initial || 100;
+        const healthRatio = Math.max(0, Math.min(1, gameState.health / healthInitial));
+        if (healthRatio < 0.3) {
+            if (!this._dangerVignette) {
+                const g = ctx.createRadialGradient(
+                    w / 2, h * 0.5, Math.min(w, h) * 0.24,
+                    w / 2, h * 0.5, Math.max(w, h) * 0.7
+                );
+                g.addColorStop(0, 'rgba(255, 60, 60, 0)');
+                g.addColorStop(1, 'rgba(255, 40, 60, 0.55)');
+                this._dangerVignette = g;
+            }
+            const pulse = 0.55 + 0.45 * Math.sin(now / 170);
+            ctx.globalAlpha = (1 - healthRatio / 0.3) * pulse;
+            ctx.fillStyle = this._dangerVignette;
+            ctx.fillRect(0, 0, w, h);
+            ctx.globalAlpha = 1;
+        }
+
+        // ---- 左上：分数 / 准确率 / 判定统计 ----
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.fillText('SCORE', left, top);
-        ctx.font = `bold ${28 * s}px sans-serif`;
-        ctx.fillStyle = '#4dabf7';
-        // 实时最终分 = 判定分 + 连击分，与结算一致
-        ctx.fillText(gameState.calculateFinalScore().finalScore.toLocaleString(), left, top + 25 * s);
 
-        const healthW = 140 * s;
-        const healthH = 14 * s;
-        const hX = this.canvasWidth - this._safeRight - (30 + this._hudRightInset) * s - healthW;
-        const hY = this._safeTop + 25 * s;
-        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.font = `600 ${9.5 * s}px ${HUD_FONT_STACK}`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fillText('SCORE', left, top);
+
+        const scoreText = gameState.calculateFinalScore().finalScore.toLocaleString();
+        ctx.font = `800 ${30 * s}px ${HUD_MONO_STACK}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = 'rgba(77, 171, 247, 0.55)';
+        ctx.shadowBlur = 14 * s;
+        ctx.fillText(scoreText, left, top + 13 * s);
+        ctx.shadowBlur = 0;
+
+        const acc = gameState.calculateTotalAcc();
+        ctx.font = `600 ${9.5 * s}px ${HUD_FONT_STACK}`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+        ctx.fillText('ACCURACY', left, top + 48 * s);
+        ctx.font = `700 ${14 * s}px ${HUD_MONO_STACK}`;
+        ctx.fillStyle = '#a5d8ff';
+        ctx.fillText(acc.toFixed(2) + '%', left, top + 60 * s);
+
+        const countsY = top + 83 * s;
+        const counts = [
+            { label: 'P', value: gameState.perfect, color: '#ffd43b' },
+            { label: 'G', value: gameState.great, color: '#69db7c' },
+            { label: 'M', value: gameState.miss, color: '#ff6b6b' }
+        ];
+        let cx = left;
+        for (let i = 0; i < counts.length; i++) {
+            const item = counts[i];
+            ctx.font = `800 ${10.5 * s}px ${HUD_FONT_STACK}`;
+            ctx.fillStyle = item.color;
+            ctx.fillText(item.label, cx, countsY);
+            const labelW = ctx.measureText(item.label).width;
+
+            const valueText = String(item.value);
+            ctx.font = `700 ${13 * s}px ${HUD_MONO_STACK}`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fillText(valueText, cx + labelW + 5 * s, countsY - 1 * s);
+            const valueW = ctx.measureText(valueText).width;
+
+            cx += labelW + valueW + (this._hudCompact ? 12 : 18) * s;
+        }
+
+        // ---- 右上：生命值 ----
+        const healthW = Math.min(210 * s, w * 0.34);
+        const healthH = 7 * s;
+        const hX = w - this._safeRight - this._hudRightInset - healthW - 24 * s;
+        const hY = this._safeTop + (30 + perfAvoid) * s;
+        const healthColor = healthRatio > 0.6 ? '#69db7c' : healthRatio > 0.3 ? '#ffd43b' : '#ff6b6b';
+
+        ctx.textAlign = 'right';
+        ctx.font = `600 ${9 * s}px ${HUD_FONT_STACK}`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fillText('LIFE', hX + healthW, hY - 12 * s);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
         ctx.beginPath();
         ctx.roundRect(hX, hY, healthW, healthH, healthH / 2);
         ctx.fill();
-        const healthColor = gameState.health > 60 ? '#69db7c' : gameState.health > 30 ? '#ffd43b' : '#ff6b6b';
-        ctx.fillStyle = healthColor;
-        ctx.beginPath();
-        ctx.roundRect(hX, hY, Math.max(0, healthW * gameState.health / CONFIG.health.initial), healthH, healthH / 2);
-        ctx.fill();
 
-        if (gameState.combo > 0) {
-            ctx.font = `bold ${36 * s}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.fillStyle = '#ffffff';
-            ctx.fillText(gameState.combo, this.canvasWidth / 2, this.canvasHeight / 2 - 10 * s);
-            ctx.font = `${12 * s}px sans-serif`;
-            ctx.fillStyle = '#aaaaaa';
-            ctx.fillText('COMBO', this.canvasWidth / 2, this.canvasHeight / 2 + 22 * s);
+        if (healthRatio > 0) {
+            ctx.globalAlpha = healthRatio < 0.3 ? 0.7 + 0.3 * Math.sin(now / 150) : 1;
+            ctx.fillStyle = healthColor;
+            ctx.shadowColor = healthColor;
+            ctx.shadowBlur = 8 * s;
+            ctx.beginPath();
+            ctx.roundRect(hX, hY, healthW * healthRatio, healthH, healthH / 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
         }
 
-        ctx.font = `${13 * s}px sans-serif`;
-        ctx.textAlign = 'left';
-        ctx.fillStyle = '#ffd43b';
-        // 窄屏压缩判定统计列间距，防止 P/G/M 溢出屏幕右侧
-        const colGap = this._hudCompact ? 72 * s : 100 * s;
-        ctx.fillText('P:' + gameState.perfect, left, top + 70 * s);
-        ctx.fillStyle = '#69db7c';
-        ctx.fillText('G:' + gameState.great, left + colGap, top + 70 * s);
-        ctx.fillStyle = '#ff6b6b';
-        ctx.fillText('M:' + gameState.miss, left + colGap * 2, top + 70 * s);
+        // 30% 危险刻度
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.fillRect(hX + healthW * 0.3, hY, 1, healthH);
 
-        const acc = gameState.calculateTotalAcc();
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('ACC:' + acc.toFixed(2) + '%', left, top + 95 * s);
+        // ---- 顶部中央：曲目信息 + 判定偏移条 ----
+        if (this._songInfo && w >= 780) {
+            const centerX = w / 2;
+            const maxTitleW = Math.min(w * 0.3, 300);
+
+            ctx.textAlign = 'center';
+            ctx.font = `700 ${15 * s}px ${HUD_FONT_STACK}`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+            ctx.fillText(this._fitText(this._songInfo.title || '', maxTitleW, ctx), centerX, top);
+
+            const meta = [this._songInfo.artist, this._songInfo.difficulty].filter(Boolean).join('   ·   ');
+            if (meta) {
+                ctx.font = `600 ${9.5 * s}px ${HUD_FONT_STACK}`;
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.fillText(this._fitText(meta, maxTitleW, ctx), centerX, top + 20 * s);
+            }
+
+            this._drawTimingBar(centerX, top + 42 * s);
+        }
+
+        // ---- 中央连击 ----
+        // 恢复倒计时期间隐藏连击，避免与 3-2-1 圆环重叠
+        if (gameState.combo > 0 && !(gameState.resumeCountdownUntil > 0)) {
+            const pop = 1 + this._comboPop * 0.18;
+            const size = 46 * s * pop;
+            const comboX = w / 2;
+            const comboY = h * 0.34;
+            const hotCombo = gameState.combo >= 50;
+
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const grad = ctx.createLinearGradient(0, comboY - size * 0.55, 0, comboY + size * 0.4);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(1, hotCombo ? '#ffd43b' : '#74c0fc');
+            ctx.font = `800 ${size}px ${HUD_MONO_STACK}`;
+            ctx.fillStyle = grad;
+            ctx.shadowColor = hotCombo ? 'rgba(255, 212, 59, 0.55)' : 'rgba(77, 171, 247, 0.5)';
+            ctx.shadowBlur = 20 * s;
+            ctx.fillText(gameState.combo, comboX, comboY);
+            ctx.shadowBlur = 0;
+
+            ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+            ctx.fillText('C O M B O', comboX, comboY + size * 0.62);
+
+            ctx.textBaseline = 'top';
+        }
 
         ctx.restore();
+    }
+
+    /** 顶部细进度条：显示当前曲目播放进度 */
+    _drawProgressBar(currentTime) {
+        const ctx = this.ctx;
+        const s = this._hudScale;
+        const x = this._safeLeft + 14 * s;
+        const y = this._safeTop + 4 * s;
+        const w = this.canvasWidth - this._safeLeft - this._safeRight - 28 * s;
+        const barH = 3 * s;
+
+        let total = CONFIG.songDuration;
+        const chart = (typeof getLoadedChartData === 'function') ? getLoadedChartData() : null;
+        if (chart && chart.meta && chart.meta.duration) {
+            total = chart.meta.duration * 1000;
+        } else if (typeof loadedMidiData !== 'undefined' && loadedMidiData && loadedMidiData.duration) {
+            total = loadedMidiData.duration * 1000;
+        }
+        if (typeof audioEngine !== 'undefined' && audioEngine.audioBuffer) {
+            total = Math.max(total, audioEngine.audioBuffer.duration * 1000);
+        }
+
+        const p = total > 0 ? Math.max(0, Math.min(1, currentTime / total)) : 0;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+        ctx.fillRect(x, y, w, barH);
+
+        if (p <= 0) return;
+
+        const grad = ctx.createLinearGradient(x, 0, x + w, 0);
+        grad.addColorStop(0, 'rgba(77, 171, 247, 0.75)');
+        grad.addColorStop(0.6, 'rgba(151, 117, 250, 0.85)');
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0.95)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x, y, w * p, barH);
+
+        // 播放头
+        const headX = x + w * p;
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#a5d8ff';
+        ctx.beginPath();
+        ctx.arc(headX, y + barH / 2, 5 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(headX, y + barH / 2, 2.4 * s, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** 判定偏移条：显示最近一次打击的 EARLY / LATE 偏差 */
+    _drawTimingBar(cx, y) {
+        const lastAt = gameState.lastHitAt || 0;
+        if (!lastAt) return;
+        const age = performance.now() - lastAt;
+        if (age > 1200) return;
+
+        const ctx = this.ctx;
+        const s = this._hudScale;
+        const width = 150 * s;
+        const barH = 3 * s;
+        const x = cx - width / 2;
+        const range = 120; // ±120ms 映射到进度条两端
+
+        ctx.globalAlpha = 0.35 + (1 - Math.min(1, age / 1200)) * 0.65;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, width, barH, barH / 2);
+        ctx.fill();
+
+        // Perfect 窗口高亮
+        const perfectW = (CONFIG.perfectWindow / range) * (width / 2);
+        ctx.fillStyle = 'rgba(255, 212, 59, 0.22)';
+        ctx.fillRect(cx - perfectW, y, perfectW * 2, barH);
+
+        // 中心基准线
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.fillRect(cx - 0.5, y - 2 * s, 1, barH + 4 * s);
+
+        const offset = Math.max(-range, Math.min(range, gameState.lastHitOffset || 0));
+        const markerX = cx + (offset / range) * (width / 2);
+        const color = Math.abs(offset) <= CONFIG.perfectWindow ? '#ffd43b' : '#69db7c';
+
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 8 * s;
+        ctx.beginPath();
+        ctx.arc(markerX, y + barH / 2, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.globalAlpha = 1;
+    }
+
+    /** 按可用宽度截断文本并追加省略号 */
+    _fitText(text, maxWidth, ctx) {
+        if (!text) return '';
+        if (ctx.measureText(text).width <= maxWidth) return text;
+        let t = text;
+        while (t.length > 1 && ctx.measureText(t + '…').width > maxWidth) {
+            t = t.slice(0, -1);
+        }
+        return t + '…';
     }
 
     // ========== 跳过前奏提示 ==========
@@ -723,36 +1208,43 @@ class Renderer {
         if (sceneTime >= notes[0].time - 5000) return;
 
         const ctx = this.ctx;
+        const s = this._hudScale;
         ctx.save();
 
         const cx = this.canvasWidth / 2;
         const cy = this._judgmentY;
         const pulse = 0.55 + 0.3 * Math.sin(performance.now() / 280);
-        const label = 'Press SPACE ×2 to skip';
+        const label = 'SPACE ×2 跳过前奏';
+        const pillH = 30 * s;
+        const pillY = cy - 92 * s;
 
-        ctx.font = 'bold 16px sans-serif';
+        ctx.font = `600 ${11 * s}px ${HUD_FONT_STACK}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        const pillW = ctx.measureText(label).width + 34 * s;
 
-        // 背景发光
-        ctx.fillStyle = `rgba(0, 0, 0, ${0.38 * pulse})`;
-        const w = ctx.measureText(label).width;
+        // 半透明胶囊底 + 霓虹描边，与游戏内按钮语言一致
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = 'rgba(10, 10, 18, 0.72)';
         ctx.beginPath();
-        ctx.roundRect(cx - w / 2 - 18, cy - 80, w + 36, 34, 17);
+        ctx.roundRect(cx - pillW / 2, pillY, pillW, pillH, pillH / 2);
         ctx.fill();
+        ctx.strokeStyle = 'rgba(77, 171, 247, 0.42)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
 
-        ctx.fillStyle = `rgba(255, 255, 255, ${pulse.toFixed(3)})`;
-        ctx.fillText(label, cx, cy - 63);
+        // 文字：双击空格跳过前奏
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fillText(label, cx, pillY + pillH / 2);
+        ctx.globalAlpha = 1;
 
         ctx.restore();
     }
 
     // ========== 暂停遮罩 ==========
     drawPauseOverlay() {
-        // 只负责压暗画面；文字与按钮由 #pauseOverlay DOM 提供
-        const ctx = this.ctx;
-        ctx.fillStyle = 'rgba(5, 5, 12, 0.72)';
-        ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
+        // 画面保持冻结可见，压暗与毛玻璃由 #pauseOverlay DOM 提供，
+        // 避免画布与 DOM 两层遮罩叠加导致场景几乎全黑
     }
 
     // ========== 图表 ==========
@@ -882,6 +1374,15 @@ class Renderer {
         // 清空触控点（重试/回主页时）
         this._touchPoints.clear();
         this._touchRipples.length = 0;
+
+        // 重置游玩界面视觉状态
+        for (let i = 0; i < this._laneFlash.length; i++) {
+            this._laneFlash[i] = 0;
+            this._laneFlashColor[i] = TRACK_COLORS[i];
+        }
+        this._hitPulse = 0;
+        this._comboPop = 0;
+        this._lastCombo = 0;
     }
 
     // ========== 触控点显示 (移动端) ==========
