@@ -15,6 +15,20 @@ const DEFAULT_SETTINGS = {
 class SettingsStore {
     constructor() {
         this._settings = null;
+        // 触屏设备默认音频偏移建议值（ms）：
+        // 移动端触控 + 蓝牙耳机/扬声器普遍存在 40~80ms 音频延迟，
+        // 正偏移使音符更晚到达判定线，抵消延迟带来的"提前按"惯性。
+        // 玩家仍可在设置页 ±100ms 内自由微调。
+        this._touchDefaultOffset = 40;
+    }
+
+    /** 首次游玩（无任何存档）时的默认值：触屏设备预置触控偏移 */
+    _defaults() {
+        const base = { ...DEFAULT_SETTINGS };
+        if (typeof IS_TOUCH_DEVICE !== 'undefined' && IS_TOUCH_DEVICE) {
+            base.audioOffset = this._touchDefaultOffset;
+        }
+        return base;
     }
 
     /** 加载设置（如果不存在则返回默认值） */
@@ -25,12 +39,12 @@ class SettingsStore {
             if (raw) {
                 const parsed = JSON.parse(raw);
                 // 合并默认值以处理新增字段
-                this._settings = { ...DEFAULT_SETTINGS, ...parsed };
+                this._settings = { ...this._defaults(), ...parsed };
             } else {
-                this._settings = { ...DEFAULT_SETTINGS };
+                this._settings = this._defaults();
             }
         } catch {
-            this._settings = { ...DEFAULT_SETTINGS };
+            this._settings = this._defaults();
         }
         return this._settings;
     }
@@ -57,7 +71,7 @@ class SettingsStore {
 
     /** 重置为默认值 */
     reset() {
-        this._settings = { ...DEFAULT_SETTINGS };
+        this._settings = this._defaults();
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(this._settings));
         } catch { /* ignore */ }

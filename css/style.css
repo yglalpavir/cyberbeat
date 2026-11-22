@@ -947,6 +947,16 @@ html.is-touch body {
     margin-top: 6px;
 }
 
+/* 触屏偏移说明：仅触屏设备显示 */
+.touch-offset-hint {
+    display: none;
+    color: rgba(105, 219, 124, 0.55);
+}
+
+html.is-touch .touch-offset-hint {
+    display: block;
+}
+
 /* ===== 开关 (Toggle Switch) ===== */
 .toggle-control {
     display: flex;
