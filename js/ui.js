@@ -500,13 +500,27 @@ class UIManager {
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             songLibrary = data.songs || [];
+            this._libraryLoadFailed = false;
         } catch (err) {
             console.error('Failed to load song library:', err);
             songLibrary = [];
+            this._libraryLoadFailed = true;
         } finally {
             this.songLibraryLoaded = true;
             this.renderSongList();
         }
+    }
+
+    /** 曲库加载失败重试（弱网/服务器临时不可用时用户可手动重试） */
+    async retryLoadSongLibrary() {
+        if (this._libraryRetrying) return;
+        this._libraryRetrying = true;
+        document.querySelectorAll('.library-retry-btn').forEach(btn => {
+            btn.disabled = true;
+            btn.textContent = 'RETRYING…';
+        });
+        await this.loadSongLibrary();
+        this._libraryRetrying = false;
     }
 
     /**
@@ -539,9 +553,22 @@ class UIManager {
         // 更新计数（显示当前活跃标签页的曲目数）
         this._updateTabCount();
 
+        // 曲库加载失败：两个标签页都显示错误态 + 重试按钮
+        const retryHtml = this._libraryLoadFailed ? `
+            <div class="library-error" id="libraryErrorState">
+                <span class="empty-icon">⚠</span>
+                <span>曲库加载失败，请检查网络后重试</span>
+                <span class="empty-hint">Library failed to load</span>
+                <button class="btn btn-primary library-retry-btn" type="button">↻ RETRY</button>
+            </div>` : '';
+
         // --- MIDI 标签页 ---
-        this.songCardsMidi.innerHTML = '';
-        if (midiSongs.length === 0) {
+        this.songCardsMidi.innerHTML = retryHtml;
+        if (this._libraryLoadFailed) {
+            this.songCardsMidi.querySelector('.library-retry-btn')
+                ?.addEventListener('click', () => this.retryLoadSongLibrary());
+            if (this.songEmptyMidi) this.songEmptyMidi.style.display = 'none';
+        } else if (midiSongs.length === 0) {
             if (this.songEmptyMidi) this.songEmptyMidi.style.display = 'flex';
         } else {
             if (this.songEmptyMidi) this.songEmptyMidi.style.display = 'none';
@@ -553,7 +580,12 @@ class UIManager {
         }
 
         // --- SONGS 标签页 ---
-        this.songCardsSongs.innerHTML = '';
+        this.songCardsSongs.innerHTML = retryHtml;
+        if (this._libraryLoadFailed) {
+            this.songCardsSongs.querySelector('.library-retry-btn')
+                ?.addEventListener('click', () => this.retryLoadSongLibrary());
+            if (this.songEmptySongs) this.songEmptySongs.style.display = 'none';
+        } else {
         const hasOsuImport = selectedSongSource === 'import' &&
             (loadedOsuData || loadedMcData || importedOsuFileName || importedMcFileName);
         if (chartSongs.length === 0 && !hasOsuImport) {
@@ -570,6 +602,7 @@ class UIManager {
                 const card = this.createImportedOsuCard();
                 this.songCardsSongs.appendChild(card);
             }
+        }
         }
 
         this.updateAllHighlights();
