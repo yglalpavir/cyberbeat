@@ -2801,6 +2801,26 @@ class UIManager {
     }
 
     /**
+     * 触控键区矩形（CSS 像素）：没有布局（未进入游戏）时返回 null。
+     * 用实测矩形而不是写死像素，横竖屏 / 不同机型下判定区都不会被裁掉。
+     */
+    _getTouchDockRect() {
+        if (!IS_TOUCH_DEVICE) return null;
+        const btns = document.querySelector('.mobile-btns');
+        if (!btns) return null;
+        const rect = btns.getBoundingClientRect();
+        return rect.height > 0 ? rect : null;
+    }
+
+    /** 触控键区顶边（含 6px 缓冲）：判定线始终在这条线上方 */
+    _getTouchDockTop() {
+        const rect = this._getTouchDockRect();
+        if (rect) return rect.top - 6;
+        const fallback = renderer ? renderer.canvasHeight : window.innerHeight;
+        return fallback - ((renderer && renderer._controlsHeight) || 92) - 12;
+    }
+
+    /**
      * 处理 Canvas 上的触控，映射到轨道（全屏均分映射，边缘外扩容错）
      * 状态按手指独立管理（_canvasTouchTracks: stateKey → track），
      * 多指同轨时各自独立持有，任一手指离开仅在自己"独占"该轨道时才释放按键。
@@ -2812,8 +2832,17 @@ class UIManager {
     _handleCanvasTouch(touchId, clientX, clientY, isDown) {
         if (!renderer) return;
 
-        // 触点落在底部触控键区域（约底部 100px）→ 忽略，避免与 DOM 按钮重复触发
-        if (clientY > renderer.canvasHeight - 110) return;
+        // 触点落在底部触控键区域内 → 忽略按下/移动，避免与 DOM 按钮重复触发。
+        // 只在按键区实际覆盖的横向范围内忽略（横屏时按键区只占右下角，左侧仍可点到底）。
+        // 松开事件一律处理，防止手指滑进按键区后按键/Hold 卡住。
+        if (isDown) {
+            const dock = this._getTouchDockRect();
+            if (dock) {
+                if (clientY > dock.top - 6 && clientX >= dock.left - 8 && clientX <= dock.right + 8) return;
+            } else if (clientY > this._getTouchDockTop()) {
+                return;
+            }
+        }
 
         // 全屏均分映射：无论轨道实际渲染宽度如何，屏幕 X 平均分为 4 轨。
         // 优势：手指不需要瞄准细轨道，拇指自然分列左右即可覆盖全部轨道。
