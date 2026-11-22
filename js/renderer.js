@@ -238,6 +238,12 @@ class Renderer {
                 const endTimeDiff = note.endTime - currentTime;
                 const yEnd = judgmentY - (endTimeDiff / 1000) * speedMul;
 
+                // 按住中：计算 hold 进度（0=头部命中时刻, 1=尾部到达），
+                // 用于长条体的进度亮度渐变
+                const holdProgress = note.holdActive && note.startTime !== undefined
+                    ? Math.max(0, Math.min(1, (currentTime - note.startTime) / (note.endTime - note.startTime)))
+                    : 0;
+
                 // Miss: 头部已过屏幕底部且未命中
                 if (rawY > canvasH + 100 && !note.hit) {
                     if (!note.missed) {
@@ -264,7 +270,7 @@ class Renderer {
                 const visYTop = yTop > -50 ? yTop : -50;
                 const visYBot = yBottom < canvasH ? yBottom : canvasH;
 
-                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], note.holdActive);
+                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], note.holdActive, holdProgress);
                 visibleCount++;
                 continue;
             }
@@ -302,7 +308,13 @@ class Renderer {
         perfMonitor.totalNotes = noteCount;
     }
 
-    _drawHoldBody(x, yTop, yBottom, color, isActive) {
+    /**
+     * 绘制 Hold 长条体
+     * @param {boolean} isActive - 是否按住中
+     * @param {number} holdProgress - 按住进度 0~1（未按住时为 0），
+     *   按住中的长条体以亮度渐变显示进度：已按过部分更亮，未到部分较暗
+     */
+    _drawHoldBody(x, yTop, yBottom, color, isActive, holdProgress = 0) {
         const ctx = this.ctx;
         const trackW = CONFIG.trackWidth;
         const bodyW = trackW - 8;
@@ -313,8 +325,20 @@ class Renderer {
         const alpha = isActive ? 0.6 : 0.35;
 
         if (bodyHeight > 0) {
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle = color;
+            if (isActive && holdProgress > 0) {
+                // 按住中：上下分段渐变（底部=已按过部分=更亮，顶部=未到部分=较暗）
+                // 判定线在屏幕下方、音符自上而落，长条尾部(下方)先经过判定线；
+                // 进度从头部开始累积，用垂直渐变表达：越接近判定线越亮
+                const grad = ctx.createLinearGradient(0, bodyTop, 0, yBottom);
+                const litAlpha = Math.min(0.95, 0.45 + holdProgress * 0.5);
+                grad.addColorStop(0, _withAlpha(color, 0.45));
+                grad.addColorStop(1, _withAlpha(color, litAlpha));
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = grad;
+            } else {
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = color;
+            }
             ctx.fillRect(bodyX, bodyTop, bodyW, bodyHeight);
             ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
             ctx.fillRect(bodyX, bodyTop, 3, bodyHeight);
@@ -954,6 +978,15 @@ class Renderer {
         this._touchRipples.length = valid;
         ctx.globalAlpha = 1.0;
     }
+}
+
+// hex 颜色转 rgba 字符串（hold 进度渐变用）
+function _withAlpha(hexColor, alpha) {
+    if (hexColor[0] !== '#') return hexColor;
+    const r = parseInt(hexColor.slice(1, 3), 16);
+    const g = parseInt(hexColor.slice(3, 5), 16);
+    const b = parseInt(hexColor.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
 }
 
 // roundRect polyfill

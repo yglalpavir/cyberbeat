@@ -2848,6 +2848,7 @@ class UIManager {
             if (note.type === 'hold' && note.endTime) {
                 note.hit = true;
                 note.holdActive = true;
+                note.startTime = currentTime;   // 记录命中时刻，用于按住进度渐变
                 const isPerfect = timeDiff <= perfectWindow;
                 activeHolds[track] = note;
                 // 存储头部判定结果，用于后续提前松开时修正计数
