@@ -2788,8 +2788,8 @@ html.is-touch .mobile-btn::before {
 @media (max-width: 768px) and (orientation: portrait) {
     #perfMonitor {
         top: auto;
-        bottom: calc(env(safe-area-inset-bottom, 0px) + 100px);
-        left: 10px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+        left: 8px;
         right: auto;
         transform: none;
         font-size: 0.6rem;
@@ -3214,7 +3214,7 @@ html.is-touch .mobile-btn::before {
     /* 性能面板：放在轨道区左侧的空白处（触控栏居中，左侧不会被挡） */
     #perfMonitor {
         top: auto;
-        bottom: calc(env(safe-area-inset-bottom, 0px) + 68px);
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
         left: 8px;
         transform: none;
         font-size: 0.5rem;
@@ -3255,7 +3255,7 @@ html.is-pointer-fine body.game-active:not(.paused) {
     .mobile-btns { height: 66px; gap: 4px; }
     .mobile-btn { font-size: 1.2rem; border-radius: 10px; min-height: 54px; }
 
-    #perfMonitor { bottom: calc(env(safe-area-inset-bottom, 0px) + 78px); }
+    #perfMonitor { bottom: calc(env(safe-area-inset-bottom, 0px) + 6px); }
 
     .logo { font-size: 1.2rem; }
     .start-sidebar { padding: 10px 8px; }
@@ -3291,8 +3291,8 @@ html.is-pointer-fine body.game-active:not(.paused) {
 
     #perfMonitor {
         top: auto;
-        bottom: calc(env(safe-area-inset-bottom, 0px) + 100px);
-        left: 12px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+        left: 8px;
         transform: none;
         font-size: 0.7rem;
         padding: 5px 16px;
