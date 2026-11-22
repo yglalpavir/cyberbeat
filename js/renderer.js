@@ -280,17 +280,18 @@ class Renderer {
             skin.drawLaneSprite(ctx, '_bottom', i, positions[i].x, jy, trackW, bottomH);
         }
 
-        // 3. 键位提示列（贴图本身很淡，只做轨道轮廓）
-        const keyH = layout.keyHeight * s;
+        // 3. 键位列：从判定线一路铺到屏幕顶部。
+        // 皮肤脚本里的 key 贴图高度是 300（设计单位），若按原高绘制会在画面中部留下
+        // 一条横向顶边——看起来像多了一根判定线。铺满轨道高度后顶边移出画面，
+        // 只留两侧的轨道描边，底部圆角正好落在判定线上。
         for (let i = 0; i < positions.length; i++) {
-            skin.drawLaneSprite(ctx, 'key', i, positions[i].x, jy - keyH, trackW, keyH);
+            skin.drawLaneSprite(ctx, 'key', i, positions[i].x, 0, trackW, jy);
         }
 
-        // 4. 按下列：白底贴图按轨道色着色，opacity 来自脚本（35%）
-        const pressH = layout.pressHeight * s;
+        // 4. 按下列：白底贴图按轨道色着色，opacity 来自脚本（35%），同样铺满判定线以上
         for (let i = 0; i < positions.length; i++) {
             if (!gameState.pressedKeys.has(KEYS[i])) continue;
-            skin.drawLaneSprite(ctx, 'press', i, positions[i].x, jy - pressH, trackW, pressH, {
+            skin.drawLaneSprite(ctx, 'press', i, positions[i].x, 0, trackW, jy, {
                 useElementColor: true,
                 useElementOpacity: true
             });

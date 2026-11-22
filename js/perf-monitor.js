@@ -31,6 +31,7 @@ class PerfMonitor {
         this._fpsEl = null;
         this._latencyEl = null;
         this._frameTimeEl = null;
+        this._jyEl = null;
 
         this._visible = true;
         this._createDOM();
@@ -43,12 +44,14 @@ class PerfMonitor {
             <span class="perf-item" id="perfFps">FPS --</span>
             <span class="perf-item" id="perfFt">FT --ms</span>
             <span class="perf-item" id="perfLat">LAT --ms</span>
+            <span class="perf-item" id="perfJy">JY --</span>
         `;
         document.body.appendChild(container);
         this._container = container;
         this._fpsEl = document.getElementById('perfFps');
         this._frameTimeEl = document.getElementById('perfFt');
         this._latencyEl = document.getElementById('perfLat');
+        this._jyEl = document.getElementById('perfJy');
     }
 
     /** 每帧开始时调用 */
@@ -102,6 +105,20 @@ class PerfMonitor {
             const latClass = this.audioLatency < 30 ? 'perf-good' : this.audioLatency < 60 ? 'perf-warn' : 'perf-bad';
             this._latencyEl.textContent = `LAT ${lat}ms`;
             this._latencyEl.className = `perf-item ${latClass}`;
+        }
+        if (this._jyEl) {
+            // 判定线位置 / 画布高度（排查"判定线位置不对"时看这一项）
+            try {
+                const r = (typeof renderer !== 'undefined') ? renderer : null;
+                if (r && r.canvasHeight > 0) {
+                    const pct = Math.round((r._judgmentY / r.canvasHeight) * 100);
+                    this._jyEl.textContent = `JY ${Math.round(r._judgmentY)}/${Math.round(r.canvasHeight)} ${pct}%`;
+                } else {
+                    this._jyEl.textContent = 'JY --';
+                }
+            } catch (err) {
+                this._jyEl.textContent = 'JY --';
+            }
         }
     }
 
