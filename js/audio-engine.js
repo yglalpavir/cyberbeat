@@ -4,17 +4,21 @@ class AudioEngine {
         this.masterGain = null;
         this.musicGain = null;      // 音乐总线：file / midi / preset → musicGain → masterGain
         this.limiter = null;
+        this.analyser = null;       // 画面律动的频谱取样点（masterGain 之后）
+        this._visualizerData = null;
+        this.visualizerGainComp = 1;
         this.isPlaying = false;
         this.nextNoteTime = 0;
         this.timerID = null;
         this.midiScheduleTimer = null;
         this.midiEvents = [];
-        this.midiStartTime = 0;
         this.convolver = null;
         // 音频文件播放
         this.audioBuffer = null;
         this.audioSource = null;
-        this.audioStartTime = 0;
+        this._musicStartTime = 0;   // AudioContext 时间轴上的谱面零点（未应用玩家校准）
+        this._fileOffsetSeconds = 0;
+        this._transportVersion = 0;
         this._currentAudioUrl = null;
         // 解码结果缓存：按曲目 key 分槽（LRU），避免不同曲目互相串台
         this._audioCache = new Map();          // key → AudioBuffer（越靠后越新）
@@ -27,7 +31,7 @@ class AudioEngine {
         // 暂停支持
         this._paused = false;
         this._mode = null;          // 'midi' | 'preset' | 'file'
-        this._pauseStartTime = 0;   // 挂起时 audioContext 的 currentTime
+
     }
     
     init() {
@@ -51,33 +55,74 @@ class AudioEngine {
         // 音量映射：0-10 → 0-1
         const vol = (typeof currentVolume !== 'undefined') ? currentVolume : CONFIG.defaultVolume;
         this.masterGain.gain.value = vol / 10;
-        
-        // 信号链：masterGain → [limiter] → destination
-        if (this.limiter) {
-            this.masterGain.connect(this.limiter);
-            this.limiter.connect(this.context.destination);
-        } else {
-            this.masterGain.connect(this.context.destination);
+
+        // 频谱只读支路：analyser 是直通节点，不改变声音。
+        // 放在 masterGain 之后可同时响应伴奏与打击音，暂停时 AudioContext 挂起，数据随之冻结。
+        if (typeof this.context.createAnalyser === 'function') {
+            try {
+                this.analyser = this.context.createAnalyser();
+                this.analyser.fftSize = 512;
+                this.analyser.smoothingTimeConstant = 0.3;
+                this._visualizerData = new Uint8Array(this.analyser.frequencyBinCount);
+            } catch (err) {
+                this.analyser = null;
+                this._visualizerData = null;
+            }
         }
 
-        // 音乐总线：所有伴奏（文件 / MIDI / 预设）都挂在这里，
-        // 停止音乐时整条总线断开即可立刻静音，不会残留上一条音频
+        // 取样支路不接扬声器，保留原来的播放信号链。
+        if (this.analyser) this.masterGain.connect(this.analyser);
+        this.masterGain.connect(this.limiter || this.context.destination);
+        if (this.limiter) this.limiter.connect(this.context.destination);
+    }
+
+    /**
+     * 读取一帧频谱供 Canvas 律动使用。
+     * 返回 AudioEngine 复用的 Uint8Array；没有 analyser 或音频未运行时返回 null。
+     */
+    getVisualizerData() {
+        if (!this.analyser || !this._visualizerData) return null;
+        if (!this.context || this.context.state !== 'running') return null;
+        try {
+            this.analyser.getByteFrequencyData(this._visualizerData);
+        } catch (err) {
+            return null;
+        }
+        const gain = this.masterGain ? this.masterGain.gain.value : 1;
+        // 低音量时适度补偿，避免频谱随音量变小；上限防止底噪被过度放大
+        this.visualizerGainComp = Math.min(2, 1 / Math.max(0.5, gain));
+        return this._visualizerData;
+    }
+
+    unlock() {
+        this.init();
+        if (!this._paused) {
+            this.context.resume().catch(() => { /* 等待下一次用户手势 */ });
+        }
+    }
+
+    _startMusic(mode, delaySeconds) {
+        this.init();
+        this._transportVersion++;
+        this._silenceMusic();
+        this.isPlaying = true;
+        this._paused = false;
+        this._mode = mode;
+        this._activeAudioKey = mode === 'file' ? this._currentAudioKey : null;
+        this._musicStartTime = this.context.currentTime + delaySeconds;
+        this._connectMusicBus();
+        this.unlock();
+    }
+
+    _connectMusicBus() {
+        // 新总线隔离上一首或跳转前已排程的合成音符。
         this.musicGain = this.context.createGain();
-        this.musicGain.gain.value = 1;
         this.musicGain.connect(this.masterGain);
     }
 
-    /** 取得（必要时重建）音乐总线的连接，返回可连接的节点 */
-    _musicBus() {
-        this.init();
-        if (!this.musicGain) {
-            this.musicGain = this.context.createGain();
-            this.musicGain.gain.value = 1;
-        }
-        try { this.musicGain.disconnect(); } catch (e) { /* 可能未连接 */ }
-        this.musicGain.gain.value = 1;
-        this.musicGain.connect(this.masterGain);
-        return this.musicGain;
+    /** 谱面与伴奏共用的时钟（ms）；开场倒计时期间为负数。 */
+    musicTimeMs() {
+        return this.isPlaying ? (this.context.currentTime - this._musicStartTime) * 1000 : 0;
     }
     
     createReverbImpulse(duration, decay, reverse) {
@@ -109,7 +154,7 @@ class AudioEngine {
         osc.stop(this.context.currentTime + time + duration);
     }
     
-    playMidiNote(noteNumber, duration, velocity) {
+    playMidiNote(noteNumber, duration, velocity, when) {
         if (!this.context) return;
         const midiCfg = getMidiConfig();
         const freq = 440 * Math.pow(2, (noteNumber - 69) / 12);
@@ -119,14 +164,14 @@ class AudioEngine {
         const vol = (velocity / midiCfg.maxVelocity) * midiCfg.velocityGain;
         osc.type = type;
         osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, this.context.currentTime);
-        gain.gain.linearRampToValueAtTime(vol, this.context.currentTime + midiCfg.noteOnRampTime);
-        gain.gain.setValueAtTime(vol, this.context.currentTime + duration);
-        gain.gain.exponentialRampToValueAtTime(0.01, this.context.currentTime + duration + midiCfg.noteOffRampTime);
+        gain.gain.setValueAtTime(0, when);
+        gain.gain.linearRampToValueAtTime(vol, when + midiCfg.noteOnRampTime);
+        gain.gain.setValueAtTime(vol, when + duration);
+        gain.gain.exponentialRampToValueAtTime(0.01, when + duration + midiCfg.noteOffRampTime);
         osc.connect(gain);
         gain.connect(this.musicGain || this.masterGain);
-        osc.start();
-        osc.stop(this.context.currentTime + duration + midiCfg.noteStopPadding);
+        osc.start(when);
+        osc.stop(when + duration + midiCfg.noteStopPadding);
     }
     
     playHitSound(type) {
@@ -175,40 +220,34 @@ class AudioEngine {
         if (this._gainPool.length < 32) this._gainPool.push(gain);
     }
     
-    startPresetMusic() {
-        this.init();
-        if (this.context.state === 'suspended') this.context.resume();
-        // 先彻底停掉上一条音乐（含残留 source / 调度器），再开始新的
-        this._silenceMusic();
-        this.isPlaying = true;
-        this._paused = false;
-        this._mode = 'preset';
-        this._activeAudioKey = null;
-        this.nextNoteTime = this.context.currentTime;
-        this._musicBus();
+    startPresetMusic(delaySeconds = 0) {
+        this._startMusic('preset', delaySeconds);
+        this.nextNoteTime = this._musicStartTime;
+        this._beatIndex = 0;
         this.scheduler();
     }
     
     scheduler() {
+        if (!this.isPlaying || this._paused) return;
         const presetCfg = getPresetMusicConfig();
         while (this.nextNoteTime < this.context.currentTime + presetCfg.presetSchedulerLookAhead) this.scheduleNote();
-        if (this.isPlaying) this.timerID = setTimeout(() => this.scheduler(), presetCfg.presetSchedulerInterval);
+        this.timerID = setTimeout(() => this.scheduler(), presetCfg.presetSchedulerInterval);
     }
     
     scheduleNote() {
         const presetCfg = getPresetMusicConfig();
         const beatDuration = 60 / CONFIG.bpm;
-        const barBeat = gameState.beatIndex % 16;
-        if (barBeat === 0 || barBeat === 4 || barBeat === 8 || barBeat === 12) this.playKick(0);
-        if (barBeat % 2 === 0) this.playHiHat(0);
-        if (barBeat === 0 || barBeat === 4 || barBeat === 8 || barBeat === 12) {
-            this.playNote(presetCfg.bassFreqs[Math.floor(gameState.beatIndex / 16) % 4], presetCfg.bassDuration, 'triangle');
+        const delay = Math.max(0, this.nextNoteTime - this.context.currentTime);
+        if (this._beatIndex % 4 === 0) {
+            this.playKick(delay);
+            this.playNote(presetCfg.bassFreqs[Math.floor(this._beatIndex / 16) % 4], presetCfg.bassDuration, 'triangle', delay);
         }
-        if (barBeat % 2 === 0) {
-            this.playNote(presetCfg.leadFreqs[Math.floor(gameState.beatIndex / 2) % 4], presetCfg.leadDuration, 'square');
+        if (this._beatIndex % 2 === 0) {
+            this.playHiHat(delay);
+            this.playNote(presetCfg.leadFreqs[Math.floor(this._beatIndex / 2) % 4], presetCfg.leadDuration, 'square', delay);
         }
         this.nextNoteTime += beatDuration / 4;
-        gameState.beatIndex++;
+        this._beatIndex++;
     }
     
     playKick(time) {
@@ -244,20 +283,16 @@ class AudioEngine {
         noise.start(this.context.currentTime + time);
     }
     
-    startMidiMusic(events) {
-        this.init();
-        if (this.context.state === 'suspended') this.context.resume();
-        // 先彻底停掉上一条音乐（含残留 source / 调度器），再开始新的
-        this._silenceMusic();
-        this.isPlaying = true;
-        this._paused = false;
-        this._mode = 'midi';
-        this._activeAudioKey = null;
-        this.midiEvents = events;
-        // 保存完整事件流，供 seek（跳过前奏）时重新注入已消费的事件
+    startMidiMusic(events, delaySeconds = 0) {
+        this._startMusic('midi', delaySeconds);
         this._midiAllEvents = events;
-        this.midiStartTime = this.context.currentTime;
-        const bus = this._musicBus();
+        this.midiEvents = events.slice();
+        this._connectMidiReverb();
+        this.masterGain.gain.value = (typeof currentVolume !== 'undefined' ? currentVolume : CONFIG.defaultVolume) / 10;
+        this.midiScheduler();
+    }
+
+    _connectMidiReverb() {
         const reverbCfg = getReverbConfig();
         if (!this.convolver) {
             this.convolver = this.context.createConvolver();
@@ -268,22 +303,19 @@ class AudioEngine {
         // convolver → limiter（混响信号也经过 limiter 保护）
         this.convolver.connect(this.limiter || this.context.destination);
         // musicGain → convolver（混响发送）
-        bus.connect(this.convolver);
-        // 同步当前全局音量
-        this.masterGain.gain.value = (typeof currentVolume !== 'undefined' ? currentVolume : CONFIG.defaultVolume) / 10;
-        this.midiScheduler();
+        this.musicGain.connect(this.convolver);
     }
     
     midiScheduler() {
-        if (!this.isPlaying) return;
+        if (!this.isPlaying || this._paused) return;
         const midiCfg = getMidiConfig();
-        const currentTime = this.context.currentTime - this.midiStartTime;
+        const now = this.context.currentTime;
         while (this.midiEvents.length > 0) {
             const event = this.midiEvents[0];
-            if (event.time <= currentTime + midiCfg.schedulerLookAhead) {
-                this.midiEvents.shift();
-                if (event.type === 'noteOn') this.playMidiNote(event.noteNumber, event.duration, event.velocity);
-            } else break;
+            const when = this._musicStartTime + event.time;
+            if (when > now + midiCfg.schedulerLookAhead) break;
+            this.midiEvents.shift();
+            if (event.type === 'noteOn') this.playMidiNote(event.noteNumber, event.duration, event.velocity, Math.max(now, when));
         }
         this.midiScheduleTimer = setTimeout(() => this.midiScheduler(), midiCfg.schedulerInterval);
     }
@@ -453,37 +485,24 @@ class AudioEngine {
         return !!buffer;
     }
 
-    /**
-     * 播放已加载的音频文件
-     * @param {number} delaySeconds - 延迟秒数后播放
-     */
-    startAudioPlayback(delaySeconds = 0) {
-        if (!this.context || !this.audioBuffer) return;
-        if (this.context.state === 'suspended') this.context.resume();
+    /** 延迟到谱面零点，并应用谱面定义的伴奏提前/延后量（秒）。 */
+    startAudioPlayback(delaySeconds = 0, offsetSeconds = 0) {
+        if (!this.audioBuffer) return;
+        this._startMusic('file', delaySeconds);
+        this._fileOffsetSeconds = offsetSeconds;
+        this._scheduleAudioSource();
+    }
 
-        // 先停掉上一条音乐（含残留 source），保证同一时刻只有一条伴奏在播
-        const buffer = this.audioBuffer;
-        this._silenceMusic();
-
-        this.isPlaying = true;
-        this._paused = false;
-        this._mode = 'file';
-        this._activeAudioKey = this._currentAudioKey;
-        this.audioBuffer = buffer;
-
-        const bus = this._musicBus();
-
+    _scheduleAudioSource() {
+        this._stopAudioSource();
+        const now = this.context.currentTime;
+        const audioZero = this._musicStartTime + this._fileOffsetSeconds;
+        const position = Math.max(0, now - audioZero);
+        if (position >= this.audioBuffer.duration) return;
         this.audioSource = this.context.createBufferSource();
-        this.audioSource.buffer = buffer;
-
-        // 连接：audioSource → musicGain → masterGain → [limiter] → destination
-        this.audioSource.connect(bus);
-
-        const startTime = this.context.currentTime + delaySeconds;
-        this.audioStartTime = startTime;
-        this.audioSource.start(startTime);
-
-        console.log(`Audio playback starting in ${delaySeconds}s`);
+        this.audioSource.buffer = this.audioBuffer;
+        this.audioSource.connect(this.musicGain);
+        this.audioSource.start(Math.max(now, audioZero), position);
     }
 
     /** 只停止当前文件音源，不动 buffer / 缓存 */
@@ -507,76 +526,57 @@ class AudioEngine {
 
     // ========== 跳过前奏（时间轴跳转） ==========
 
-    /**
-     * 将音乐时间轴跳转到 sceneMs（毫秒，0 = 音乐起点）
-     * @param {number} sceneMs - 目标场景时间
-     */
-    seekMusic(sceneMs) {
+    /** 跳到未应用玩家校准的谱面时间（ms），同时重排伴奏。 */
+    seekMusic(timeMs) {
         if (!this.isPlaying || this._paused) return;
-        const t = Math.max(0, sceneMs) / 1000;
-
-        // 音频文件：重建 source 并从目标位置重新起播
+        const seconds = timeMs / 1000;
+        this._musicStartTime = this.context.currentTime - seconds;
         if (this._mode === 'file' && this.audioBuffer) {
-            try { this.audioSource.stop(); } catch (e) {}
-            try { this.audioSource.disconnect(); } catch (e) {}
-            this.audioSource = this.context.createBufferSource();
-            this.audioSource.buffer = this.audioBuffer;
-            this.audioSource.connect(this.musicGain || this.masterGain);
-            this.audioSource.start(0, t);
-            this.audioStartTime = this.context.currentTime - t;
+            this._scheduleAudioSource();
             return;
         }
 
-        // MIDI：平移基准时间，并重新注入已消费的音乐事件
+        this._silenceMusic();
+        this._connectMusicBus();
         if (this._mode === 'midi') {
-            const all = this._midiAllEvents || [];
-            this.midiEvents = all.filter(ev => ev.time >= sceneMs).map(ev => Object.assign({}, ev));
-            this.midiStartTime = this.context.currentTime - t;
-            if (this.midiScheduleTimer) {
-                clearTimeout(this.midiScheduleTimer);
-                this.midiScheduleTimer = null;
-            }
+            this.midiEvents = this._midiAllEvents.filter(event => event.time >= seconds);
+            this._connectMidiReverb();
             this.midiScheduler();
-            return;
+        } else if (this._mode === 'preset') {
+            const step = 60 / CONFIG.bpm / 4;
+            this._beatIndex = Math.max(0, Math.ceil(seconds / step));
+            this.nextNoteTime = this._musicStartTime + this._beatIndex * step;
+            this.scheduler();
         }
-
-        // preset 节拍器音乐无前奏，无需处理
     }
 
     // ========== 暂停 / 恢复 ==========
 
-    /**
-     * 暂停当前播放的所有音乐（Web Audio suspend 冻结所有已调度声音）
-     */
+    /** 暂停同一个音频时钟，已排程的采样和合成音符随之冻结。 */
     pauseMusic() {
-        if (!this.isPlaying || this._paused) return;
+        if (!this.isPlaying) return;
+        this._transportVersion++;
         this._paused = true;
-        if (this._pauseStartTime === 0) this._pauseStartTime = this.context ? this.context.currentTime : 0;
         if (this.timerID) { clearTimeout(this.timerID); this.timerID = null; }
         if (this.midiScheduleTimer) { clearTimeout(this.midiScheduleTimer); this.midiScheduleTimer = null; }
-        if (this.context && this.context.state === 'running') {
-            this.context.suspend();
-        }
+        this.context.suspend().catch(() => { /* 上下文可能已关闭 */ });
     }
 
-    /**
-     * 恢复播放（对齐时间轴，重启对应调度器）
-     */
-    resumeMusic() {
-        if (!this._paused) return;
-        this._paused = false;
-
-        if (this.context) {
-            const pauseDuration = this.context.currentTime - this._pauseStartTime;
-            // MIDI 时间轴整体平移，保证尚未排程的事件仍对齐
-            if (this._mode === 'midi') this.midiStartTime += Math.max(0, pauseDuration);
-            this._pauseStartTime = 0;
-            if (this.context.state === 'suspended') this.context.resume();
+    async resumeMusic() {
+        if (!this.isPlaying) return false;
+        if (!this._paused) return true;
+        const version = ++this._transportVersion;
+        try {
+            await this.context.resume();
+        } catch {
+            return false;
         }
-
-        if (!this.isPlaying) return;
+        // 恢复过程中可能再次暂停、重试或换曲。过期的恢复不能启动调度器。
+        if (version !== this._transportVersion) return false;
+        this._paused = false;
         if (this._mode === 'preset') this.scheduler();
         else if (this._mode === 'midi') this.midiScheduler();
+        return true;
     }
 
     // ========== 停止所有音乐 ==========
@@ -602,7 +602,8 @@ class AudioEngine {
     stopMusic() {
         this.isPlaying = false;
         this._paused = false;
-        this._pauseStartTime = 0;
+        this._transportVersion++;
+        this._midiAllEvents = [];
         this._mode = null;
         this._activeAudioKey = null;
         this._silenceMusic();

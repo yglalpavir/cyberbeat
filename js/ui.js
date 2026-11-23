@@ -9,11 +9,7 @@ class UIManager {
         this._detailRecordId = null;
         this._pendingChartHistory = null;
 
-        // 音乐启动定时器状态（暂停时需要顺延）
-        this._musicStartTimeout = null;
-        this._musicDelayMs = 0;
-        this._musicScheduledAt = 0;
-        this._musicRestartDelay = 0;
+        this._resumeTask = null;
 
         // 排行榜返回来源
         this._lbOrigin = 'start';
@@ -366,83 +362,28 @@ class UIManager {
     // ========== 页面可见性 / 唤醒锁 ==========
     _setupVisibilityHandling() {
         document.addEventListener('visibilitychange', () => {
+            if (gameState.screen !== 'game') return;
             if (document.hidden) {
-                if (gameState.screen !== 'game') return;
-
                 if (gameState.resumeCountdownUntil > 0) {
-                    // 恢复倒计时中切后台：回到暂停态（画面冻结、判定暂停），
-                    // 记录剩余倒计时与待平移量，回前台后重新走 3-2-1
-                    const hiddenAt = performance.now();
-                    const remaining = gameState.resumeCountdownUntil - hiddenAt;
-                    gameState.resumeCountdownUntil = 0;
-                    gameState._stashedResumeShift = gameState._pendingResumeShift || 0;
-                    gameState._pendingResumeShift = 0;
-                    gameState._resumeCountdownRemaining = Math.max(0, remaining);
-                    gameState.paused = true;
-                    gameState.pauseStartedAt = hiddenAt;
-                    if (renderer) renderer.resetTouchPoints();
-                    this._clearCanvasTouchTracks();
-                    this._setPauseOverlayVisible(true);
-                    return;
-                }
-
-                if (!gameState.paused) {
-                    // 触屏指南打开时倒计时已冻结，后台切换无需处理
-                    if (gameState._initialCountdownFrozen) return;
-
-                    const currentTime = performance.now() - gameState.startTime;
-                    if (currentTime < 0) {
-                        // 初始倒计时中切后台：冻结剩余倒计时（回到前台时重设），
-                        // 防止后台期间 performance.now() 继续走消耗倒计时、音乐调度错位
-                        gameState._initialCountdownRemaining = -currentTime;
-                        gameState._initialCountdownFrozen = true;
-                        // 暂停挂起的音乐启动定时器
-                        if (this._musicStartTimeout) {
-                            clearTimeout(this._musicStartTimeout);
-                            this._musicStartTimeout = null;
-                            this._musicRestartDelay = Math.max(0, this._musicDelayMs - (performance.now() - this._musicScheduledAt));
-                        }
-                        return;
+                    // 回前台时继续剩余倒计时，不重新采样已冻结的谱面位置。
+                    gameState.resumeCountdownRemaining = Math.max(0, gameState.resumeCountdownUntil - performance.now());
+                    this._pauseGame();
+                } else if (!gameState.paused) {
+                    if (gameState.currentTime() < 0 || gameState.initialCountdownFrozen) {
+                        this._freezeInitialCountdown();
+                    } else {
+                        this._pauseGame();
                     }
-                    this.togglePause();
                 }
-            } else {
-                // 回到前台
-                const inGame = gameState.screen === 'game';
-                // 触屏指南打开中：倒计时保持冻结，等指南关闭时统一恢复
-                if (inGame && this.touchHint && !this.touchHint.classList.contains('hidden')) {
-                    return;
-                }
-                // 初始倒计时被冻结：以剩余量重设倒计时与音乐调度
-                if (inGame && gameState._initialCountdownFrozen) {
-                    const remaining = Math.max(0, gameState._initialCountdownRemaining || 0);
-                    gameState._initialCountdownFrozen = false;
-                    gameState._initialCountdownRemaining = 0;
-                    gameState.startTime = performance.now() + remaining;
-                    gameState.intervalStartTime = gameState.startTime;
-                    this._musicDelayMs = remaining;
-                    this._musicScheduledAt = performance.now();
-                    if (this._musicRestartDelay > 0 || remaining > 0) {
-                        if (this._musicStartTimeout) clearTimeout(this._musicStartTimeout);
-                        this._musicStartTimeout = setTimeout(() => {
-                            this._musicStartTimeout = null;
-                            this._playGameMusic((getLoadedChartData()?.meta?.audioOffset) || 0);
-                        }, remaining);
-                        this._musicRestartDelay = 0;
-                    }
-                } else if (inGame && gameState._resumeCountdownRemaining > 0) {
-                    // 恢复倒计时被冻结：重新走 3-2-1（还原待平移量）
-                    gameState.paused = false;
-                    gameState._pendingResumeShift = gameState._stashedResumeShift || 0;
-                    gameState._stashedResumeShift = 0;
-                    gameState.resumeCountdownUntil = performance.now() + gameState._resumeCountdownRemaining;
-                    gameState._resumeCountdownRemaining = 0;
-                    this._setPauseOverlayVisible(false);
-                }
-                if (inGame && !gameState.paused) {
-                    this._requestWakeLock();
-                }
+                return;
             }
+
+            if (gameState.initialCountdownFrozen) {
+                this._resumeInitialCountdown();
+            } else if (gameState.resumeCountdownRemaining !== null) {
+                this._beginResumeCountdown(gameState.resumeCountdownRemaining);
+            }
+            if (!gameState.paused) this._requestWakeLock();
         });
     }
 
@@ -483,10 +424,10 @@ class UIManager {
     }
 
     _canSkipIntro() {
-        if (gameState.screen !== 'game' || gameState.paused) return false;
+        if (gameState.screen !== 'game' || gameState.paused || this._isResumeCounting() || gameState.initialCountdownFrozen) return false;
         if (!audioEngine.isPlaying || audioEngine._paused) return false;
 
-        const sceneTime = performance.now() - gameState.startTime;
+        const sceneTime = gameState.currentTime();
         if (sceneTime < 0 || sceneTime > 10000) return false;
 
         const firstNoteTime = this._getFirstNoteTime();
@@ -2169,13 +2110,9 @@ class UIManager {
             showLoading(false);
         }
 
-        // 停止一切残留播放（结算音乐/上一局音乐），并清掉可能挂起的启动定时器
+        // 停止一切残留播放（结算音乐/上一局音乐）。
         audioEngine.stopMusic();
-        if (audioEngine.unlock) audioEngine.unlock();
-        if (this._musicStartTimeout) {
-            clearTimeout(this._musicStartTimeout);
-            this._musicStartTimeout = null;
-        }
+        this._resumeTask = null;
 
         // 本局伴奏：只允许"当前这首歌"的解码结果进入播放，避免串到上一首。
         // 放在预加载结算音乐之前，让当前伴奏先成为缓存中的"在用槽位"，不会被挤掉。
@@ -2246,29 +2183,14 @@ class UIManager {
         // 重置渲染器对象池
         if (renderer) renderer.resetPools();
 
-        // 设置未来时间实现倒计时（谱面时间从倒计时结束时开始计算）
-        // 全局偏移：正值使音符更晚到达判定线，负值反之
-        const countdownMs = CONFIG.countdownDuration;
-        gameState.startTime = performance.now() + countdownMs + audioOffsetMs;
-
-        // 手动设置游戏状态（倒计时通过 startTime 指向未来实现）
         gameState.screen = 'game';
         gameState.notes = notes;
         gameState.totalNotes = notes.length;
         gameState.isPlaying = true;
-        gameState.intervalStartTime = performance.now() + countdownMs + audioOffsetMs;
+        gameState.timingOffset = audioOffsetMs;
 
-        // 计算音频偏移（MC 谱面的 sound offset，单位 ms）
-        const audioOffset = (getLoadedChartData()?.meta?.audioOffset) || 0;
-
-        // 延迟启动音乐（倒计时 + 音频偏移）；记录调度信息以便暂停时顺延
-        this._musicDelayMs = countdownMs;
-        this._musicScheduledAt = performance.now();
-        this._musicRestartDelay = 0;
-        this._musicStartTimeout = setTimeout(() => {
-            this._musicStartTimeout = null;
-            this._playGameMusic(audioOffset);
-        }, countdownMs);
+        // 提前在 AudioContext 上排程，倒计时和谱面无需各自计时。
+        this._playGameMusic(CONFIG.countdownDuration / 1000);
 
         // 确保 Canvas 尺寸正确
         if (renderer) {
@@ -2278,16 +2200,7 @@ class UIManager {
 
         // 首次游玩：弹出触屏操作指南并冻结初始倒计时，关闭后继续
         this._maybeShowTouchHint();
-        if (this.touchHint && !this.touchHint.classList.contains('hidden')) {
-            const remaining = Math.max(0, gameState.startTime - performance.now());
-            gameState._initialCountdownRemaining = remaining;
-            gameState._initialCountdownFrozen = true;
-            if (this._musicStartTimeout) {
-                clearTimeout(this._musicStartTimeout);
-                this._musicStartTimeout = null;
-                this._musicRestartDelay = Math.max(0, this._musicDelayMs - (performance.now() - this._musicScheduledAt));
-            }
-        }
+        if (document.hidden || this._isTouchHintVisible()) this._freezeInitialCountdown();
 
         // 启动游戏循环
         requestAnimationFrame(gameLoop);
@@ -2300,37 +2213,38 @@ class UIManager {
         if (markSeen) {
             try { localStorage.setItem('cyberbeat_touch_hint_seen', '1'); } catch (e) { /* ignore */ }
         }
-        // 若初始倒计时因指南冻结，恢复倒计时与音乐调度
-        if (gameState._initialCountdownFrozen) {
-            const remaining = Math.max(0, gameState._initialCountdownRemaining || 0);
-            gameState._initialCountdownFrozen = false;
-            gameState._initialCountdownRemaining = 0;
-            gameState.startTime = performance.now() + remaining;
-            gameState.intervalStartTime = gameState.startTime;
-            this._musicDelayMs = remaining;
-            this._musicScheduledAt = performance.now();
-            if (this._musicStartTimeout) clearTimeout(this._musicStartTimeout);
-            this._musicStartTimeout = setTimeout(() => {
-                this._musicStartTimeout = null;
-                this._playGameMusic((getLoadedChartData()?.meta?.audioOffset) || 0);
-            }, remaining);
-            this._musicRestartDelay = 0;
-        }
+        this._resumeInitialCountdown();
     }
 
-    /** 按当前加载的数据启动游戏音乐（供倒计时结束或暂停恢复时调用） */
-    _playGameMusic(audioOffset) {
+    _isTouchHintVisible() {
+        return this.touchHint && !this.touchHint.classList.contains('hidden');
+    }
+
+    _freezeInitialCountdown() {
+        gameState.pauseSnapshotTime = gameState.currentTime();
+        gameState.initialCountdownFrozen = true;
+        audioEngine.pauseMusic();
+    }
+
+    async _resumeInitialCountdown() {
+        if (gameState.screen !== 'game' || !gameState.initialCountdownFrozen || document.hidden || this._isTouchHintVisible()) return;
+        if (await audioEngine.resumeMusic()) gameState.initialCountdownFrozen = false;
+    }
+
+    _playGameMusic(delaySeconds) {
+        const chart = getLoadedChartData();
         if (loadedMidiData) {
-            audioEngine.startMidiMusic([...loadedMidiData.events]);
+            audioEngine.startMidiMusic(loadedMidiData.events, delaySeconds);
         } else if (audioEngine.audioBuffer) {
-            audioEngine.startAudioPlayback(audioOffset / 1000);
+            audioEngine.startAudioPlayback(delaySeconds, (chart?.meta?.audioOffset || 0) / 1000);
         } else {
-            CONFIG.bpm = getLoadedChartData()?.meta?.bpm || 120;
-            audioEngine.startPresetMusic();
+            CONFIG.bpm = chart?.meta?.bpm || 120;
+            audioEngine.startPresetMusic(delaySeconds);
         }
     }
 
     endGame() {
+        gameState.recordIntervalStats();
         gameState.screen = 'result';
         gameState.isPlaying = false;
         gameState.paused = false;
@@ -2338,13 +2252,7 @@ class UIManager {
         this._setPauseOverlayVisible(false);
         this.setSkipIntroVisible(false);
         this._releaseWakeLock();
-        // 清除可能挂起的启动音乐定时器（防止结算后音乐再响起）
-        if (this._musicStartTimeout) {
-            clearTimeout(this._musicStartTimeout);
-            this._musicStartTimeout = null;
-        }
         audioEngine.stopMusic();
-        gameState.recordIntervalStats();
         // 清除所有活跃 hold
         gameState.activeHolds = [null, null, null, null];
         gameState.holdReleaseTimes = [0, 0, 0, 0];
@@ -2500,9 +2408,10 @@ class UIManager {
             return;
         }
 
-        // 现场加载（首次游玩未预载完成的情形）
-        const loaded = await audioEngine.loadAudioFile(audioPath, { cacheKey });
-        if (loaded && audioEngine.useCachedAudio(cacheKey)) {
+        // 现场加载若晚于重试完成，不能覆盖新一局的伴奏和时钟。
+        const finishedNotes = gameState.notes;
+        const loaded = await audioEngine.loadAudioFile(audioPath, { cacheKey, setCurrent: false });
+        if (loaded && gameState.screen === 'result' && gameState.notes === finishedNotes && audioEngine.useCachedAudio(cacheKey)) {
             audioEngine.startAudioPlayback(0);
         }
     }
@@ -2543,10 +2452,7 @@ class UIManager {
     retryGame() {
         // 停止结算音乐等残留播放
         audioEngine.stopMusic();
-        if (this._musicStartTimeout) {
-            clearTimeout(this._musicStartTimeout);
-            this._musicStartTimeout = null;
-        }
+        this._resumeTask = null;
         // 隐藏结果画面
         this.resultScreen.classList.add('hidden');
         // 直接重新开始当前歌曲
@@ -2906,22 +2812,11 @@ class UIManager {
      * 双击空格将场景时间轴与音乐时间轴整体跳到「首个音符前 5s」
      */
     skipIntro() {
-        if (gameState.screen !== 'game' || gameState.paused) return;
-        if (!audioEngine.isPlaying || audioEngine._paused) return;   // 音乐尚未启动
-
-        const now = performance.now();
-        const sceneTime = now - gameState.startTime;
-        if (sceneTime < 0 || sceneTime > 10000) return;              // 仅限音乐开始后 10s 内
-
-        const firstNoteTime = this._getFirstNoteTime();
-        if (firstNoteTime === null) return;
-        if (sceneTime >= firstNoteTime - 5000) return;               // 已进入音符 5s 缓冲区
-
-        const target = Math.max(0, firstNoteTime - 5000);
-        const delta = target - sceneTime;                 // 场景时间需前进的量
-        gameState.startTime = now - target;               // 直接重定位场景时间轴起点
-        gameState.intervalStartTime -= delta;             // 保持与 startTime 的相对偏移不变
-        audioEngine.seekMusic(target);
+        if (!this._canSkipIntro()) return;
+        const target = this._getFirstNoteTime() - 5000;
+        const delta = target - gameState.currentTime();
+        audioEngine.seekMusic(target + gameState.timingOffset);
+        gameState.intervalStartTime += delta;
         this.setSkipIntroVisible(false);
         console.log(`Skipped intro: jumped ${delta.toFixed(0)}ms to T+${target.toFixed(0)}ms`);
     }
@@ -2944,69 +2839,50 @@ class UIManager {
     // ========== 暂停 / 恢复 ==========
     togglePause() {
         if (gameState.screen !== 'game') return;
-
-        if (gameState.paused) {
-            // 恢复：启动 3 秒重现倒计时，倒计时结束后时间轴再整体平移，
-            // 让玩家从暂停画面回到操作状态，避免恢复瞬间手忙脚乱漏判
-            const pendingShift = performance.now() - gameState.pauseStartedAt;
-            gameState.resumeCountdownUntil = performance.now() + CONFIG.countdownDuration;
-            gameState._pendingResumeShift = pendingShift;
-            gameState.paused = false;
-            this._setPauseOverlayVisible(false);
-        } else {
-            // 恢复倒计时期间允许再暂停（取消恢复）
-            if (gameState.resumeCountdownUntil > 0) {
-                gameState.resumeCountdownUntil = 0;
-                gameState._pendingResumeShift = 0;
-            }
-            const currentTime = performance.now() - gameState.startTime;
-            if (currentTime < 0) return; // 初始倒计时中不允许暂停
-            gameState.paused = true;
-            gameState.pauseStartedAt = performance.now();
-            gameState.pauseSnapshotTime = currentTime;
-            // 清空按键状态，避免暂停期间的按键在恢复后被当作长按
-            gameState.pressedKeys.clear();
-            if (renderer) renderer.resetTouchPoints();
-            this._clearCanvasTouchTracks();
-
-            // 音乐尚未启动（定时器挂起中）：暂停时顺延其剩余时间
-            if (this._musicStartTimeout) {
-                clearTimeout(this._musicStartTimeout);
-                this._musicStartTimeout = null;
-                this._musicRestartDelay = Math.max(0, this._musicDelayMs - (performance.now() - this._musicScheduledAt));
-            } else {
-                this._musicRestartDelay = 0;
-            }
-
-            audioEngine.pauseMusic();
-            this._setPauseOverlayVisible(true);
+        if (gameState.initialCountdownFrozen) {
+            this._resumeInitialCountdown();
+        } else if (gameState.paused) {
+            this._beginResumeCountdown();
+        } else if (gameState.currentTime() >= 0) {
+            this._pauseGame();
         }
     }
 
-    /** 每帧调用：恢复倒计时结束时平移时间轴并恢复音乐。返回 true 表示刚完成恢复 */
-    _tickResumeCountdown() {
-        if (gameState.screen !== 'game' || gameState.paused) return false;
-        if (!gameState.resumeCountdownUntil || performance.now() < gameState.resumeCountdownUntil) return false;
-
-        // 时间轴整体平移暂停时长（含恢复倒计时本身）
-        const shift = gameState._pendingResumeShift || 0;
-        gameState.startTime += shift;
-        gameState.intervalStartTime += shift;
+    _pauseGame() {
+        // 恢复倒计时里再次暂停时，currentTime() 仍是原先的快照。
+        gameState.pauseSnapshotTime = gameState.currentTime();
+        gameState.paused = true;
         gameState.resumeCountdownUntil = 0;
-        gameState._pendingResumeShift = 0;
-        gameState.pauseStartedAt = 0;
+        this._resumeTask = null;
+        this._releaseAllTouches();
+        if (renderer) renderer.resetTouchPoints();
+        audioEngine.pauseMusic();
+        this._setPauseOverlayVisible(true);
+    }
 
-        audioEngine.resumeMusic();
+    _beginResumeCountdown(duration = CONFIG.countdownDuration) {
+        gameState.resumeCountdownRemaining = null;
+        gameState.resumeCountdownUntil = performance.now() + duration;
+        gameState.paused = false;
+        this._setPauseOverlayVisible(false);
+    }
 
-        // 若音乐启动定时器挂起中，按剩余延迟重新调度
-        if (this._musicRestartDelay > 0 && this._musicDelayMs > 0) {
-            this._musicStartTimeout = setTimeout(() => {
-                this._musicStartTimeout = null;
-                this._playGameMusic((getLoadedChartData()?.meta?.audioOffset) || 0);
-            }, this._musicRestartDelay);
-            this._musicRestartDelay = 0;
-        }
-        return true;
+    /** 倒计时到点后，保持画面和判定冻结，直到音频上下文实际恢复。 */
+    _tickResumeCountdown(now) {
+        const deadline = gameState.resumeCountdownUntil;
+        if (!deadline || this._resumeTask || document.hidden || now < deadline) return;
+        const task = audioEngine.resumeMusic();
+        this._resumeTask = task;
+        task.then(resumed => {
+            if (this._resumeTask !== task || gameState.screen !== 'game') return;
+            this._resumeTask = null;
+            if (!resumed) {
+                this._pauseGame();
+                return;
+            }
+            this._releaseAllTouches();
+            gameState.resumeCountdownUntil = 0;
+        });
     }
 
     // ========== 触屏输入（按可见轨道多点触控） ==========
@@ -3105,11 +2981,6 @@ class UIManager {
         }
     }
 
-    /** 清除滑动换轨的手指轨道映射（暂停/重开时调用） */
-    _clearCanvasTouchTracks() {
-        if (this._canvasTouchTracks) this._canvasTouchTracks.clear();
-    }
-
     /** 清除所有触控状态（切后台 / 失焦 / 暂停重开）：不判定、不结算，只防止按键卡住 */
     _releaseAllTouches() {
         if (this._canvasTouchTracks) {
@@ -3146,7 +3017,7 @@ class UIManager {
 
         // 使用渲染器实际绘制的判定线位置
         const judgmentY = renderer._judgmentY;
-        const currentTime = performance.now() - gameState.startTime;
+        const currentTime = gameState.currentTime();
 
         if (currentTime < 0) return false;
 
@@ -3852,7 +3723,7 @@ class UIManager {
         if (gameState.paused) return;
         if (this._isResumeCounting()) return;   // 恢复倒计时期间不判定
 
-        const currentTime = performance.now() - gameState.startTime;
+        const currentTime = gameState.currentTime();
         if (currentTime < 0) return;
 
         const holdNote = gameState.activeHolds[track];
@@ -3871,7 +3742,7 @@ class UIManager {
      * - 尾部到达自动完成
      */
     updateHolds() {
-        const currentTime = performance.now() - gameState.startTime;
+        const currentTime = gameState.currentTime();
         if (currentTime < 0) return;
         if (gameState.paused) return;
         if (this._isResumeCounting()) return;   // 恢复倒计时期间冻结 hold 判定

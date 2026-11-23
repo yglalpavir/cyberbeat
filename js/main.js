@@ -162,8 +162,19 @@ function gameLoop(timestamp) {
     // 每帧同步游戏内 DOM 控件（暂停按钮 / 跳过前奏按钮）
     if (ui) ui.updateInGameUI();
 
+    // === 帧时序平滑 (VSync) ===
+    // 限制最大帧间隔为 50ms (20fps 下限)，防止大跳帧导致的间断感
+    let rawDelta = timestamp - _lastFrameTime;
+    if (rawDelta <= 0) rawDelta = 16.67;
+    const frameDelta = Math.min(rawDelta, 50);
+    _lastFrameTime = timestamp;
+    renderer.setFrameDelta(frameDelta);
+
+    const currentTime = gameState.currentTime();
+
     // 暂停恢复倒计时：画面冻结在暂停瞬间，只画 3-2-1
     if (gameState.resumeCountdownUntil > 0 && !gameState.paused) {
+        renderer.setFrameDelta(0);
         const ctx = renderer.ctx;
         ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
         renderer.drawBackground(0);
@@ -175,23 +186,15 @@ function gameLoop(timestamp) {
         renderer.drawCountdown((gameState.resumeCountdownUntil - now) / 1000, true);
         perfMonitor.endFrame();
 
-        // 倒计时结束 → 平移时间轴恢复音乐
-        if (ui && ui._tickResumeCountdown()) {
-            _lastFrameTime = timestamp;
-        }
+        // 倒计时结束后等待音频恢复，谱面继续使用同一个时钟。
+        if (ui) ui._tickResumeCountdown(now);
         requestAnimationFrame(gameLoop);
         return;
     }
 
-    // === 帧时序平滑 (VSync) ===
-    // 限制最大帧间隔为 50ms (20fps 下限)，防止大跳帧导致的间断感
-    let rawDelta = timestamp - _lastFrameTime;
-    if (rawDelta <= 0) rawDelta = 16.67;
-    const frameDelta = Math.min(rawDelta, 50);
-    _lastFrameTime = timestamp;
-
     // 暂停：冻结场景时间，仅绘制遮罩（不推进、不判定）
     if (gameState.paused) {
+        renderer.setFrameDelta(0);
         const ctx = renderer.ctx;
         ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
         renderer.drawBackground(0);
@@ -207,12 +210,15 @@ function gameLoop(timestamp) {
         return;
     }
 
-    const countdownRemaining = (gameState.startTime - now) / 1000;
+    const countdownRemaining = -currentTime / 1000;
 
     // 倒计时期间
     if (countdownRemaining > 0) {
+        const frozen = gameState.initialCountdownFrozen;
+        if (frozen) renderer.setFrameDelta(0);
         const ctx = renderer.ctx;
         ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
+        if (!frozen) renderer.updateRhythm(currentTime);
         renderer.drawBackground(0);
         renderer.drawTracks();
         renderer.drawCountdown(countdownRemaining);
@@ -222,12 +228,10 @@ function gameLoop(timestamp) {
         return;
     }
 
-    const currentTime = now - gameState.startTime;
-
-    // 统计间隔记录
-    if (currentTime - (gameState.intervalStartTime - gameState.startTime) >= CONFIG.statsInterval) {
+    // 统计间隔与音符采用同一个谱面时钟
+    if (currentTime - gameState.intervalStartTime >= CONFIG.statsInterval) {
         gameState.recordIntervalStats();
-        gameState.intervalStartTime = now;
+        gameState.intervalStartTime = currentTime;
     }
 
     // 游戏结束判断（音频可能比谱面更长，取较大值避免提前结束）
@@ -243,12 +247,10 @@ function gameLoop(timestamp) {
         return;
     }
 
-    // Frame delta for time-based effects
-    if (renderer) renderer.setFrameDelta(frameDelta);
-
     // === 主渲染 ===
     const ctx = renderer.ctx;
     ctx.clearRect(0, 0, renderer.canvasWidth, renderer.canvasHeight);
+    renderer.updateRhythm(currentTime);
     renderer.drawBackground(currentTime);
     renderer.drawTracks();
     renderer.drawLasers();

@@ -50,6 +50,26 @@ class Renderer {
         this._lastCombo = 0;
         this._songInfo = null;                 // { title, artist, difficulty }
 
+        // 频谱律动 / 节拍边框 / 打击回弹（全部由谱面时钟与音频驱动，暂停即冻结）
+        this._motionEnabled = true;
+        this._eqBars = [];                     // 预计算的频谱柱几何
+        this._bars = new Float32Array(0);
+        this._prevBassRaw = 0;
+        this._beat = 0;                        // 0~1 节拍脉冲
+        this._lastOnsetAt = -Infinity;
+        this._fallbackBeat = -1;
+        this._countdownSecond = null;
+        this._ringAge = [Infinity, Infinity, Infinity, Infinity];
+        this._ringColor = TRACK_COLORS.slice();
+        this._milestoneAge = Infinity;
+        this._milestoneCombo = 0;
+        this._displayScore = null;             // 缓动后的分数
+        this._displayHealth = null;
+        this._healthGhost = null;
+        this._eqTop = 0;
+        this._eqBottom = 0;
+        this._setupMotionPreference();
+
         // 皮肤（Malody V）：null = 内置扁平皮肤
         this.skin = null;
         this._skinScale = 1;
@@ -81,10 +101,24 @@ class Renderer {
         this.resize();
     }
 
+    /** 跟随系统“减少动态效果”设置；Canvas 动画无法被 CSS 媒体查询覆盖，需要单独处理。 */
+    _setupMotionPreference() {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+        try {
+            const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+            this._motionEnabled = !query.matches;
+            const onChange = (event) => { this._motionEnabled = !event.matches; };
+            if (typeof query.addEventListener === 'function') query.addEventListener('change', onChange);
+            else if (typeof query.addListener === 'function') query.addListener(onChange);
+        } catch (err) {
+            this._motionEnabled = true;
+        }
+    }
+
     /** 设置帧间隔（毫秒），用于 delta-time 缩放视觉效果 */
     setFrameDelta(dt) {
-        // 钳制到 8~50ms（20~120fps 等效），防止极值
-        this._dt = dt < 8 ? 8 : (dt > 50 ? 50 : dt);
+        // 暂停/开场引导冻结时传入 0，绘制可继续但所有状态不推进
+        this._dt = dt === 0 ? 0 : (dt < 8 ? 8 : (dt > 50 ? 50 : dt));
     }
 
     resize() {
@@ -201,6 +235,46 @@ class Renderer {
         }
 
         this.ctx.imageSmoothingEnabled = false;
+        this._buildEqualizer();
+    }
+
+    /** 预计算底部频谱柱的位置与颜色，避免每帧测量布局。 */
+    _buildEqualizer() {
+        const count = Math.max(20, Math.min(56, Math.floor(this.canvasWidth / 26)));
+        if (this._bars.length !== count) this._bars = new Float32Array(count);
+
+        this._eqBars.length = 0;
+        const side = Math.max(8, Math.round(10 * this._hudScale));
+        const usable = Math.max(1, this.canvasWidth - side * 2);
+        const step = usable / count;
+        const barW = Math.max(2, Math.floor(step * 0.56));
+        const positions = this.trackPositions;
+        const fieldLeft = this.trackStartX - this._fieldPad;
+        const fieldRight = fieldLeft + this._fieldWidth;
+
+        for (let i = 0; i < count; i++) {
+            const x = Math.round(side + i * step + (step - barW) / 2);
+            const cx = x + barW / 2;
+            let lane = -1;
+            if (positions.length > 0 && cx >= fieldLeft && cx <= fieldRight) {
+                for (let t = 0; t < positions.length; t++) {
+                    if (cx >= positions[t].x && cx < positions[t].x + CONFIG.trackWidth) {
+                        lane = t;
+                        break;
+                    }
+                }
+                if (lane < 0) lane = cx < positions[0].cx ? 0 : positions.length - 1;
+            }
+            this._eqBars.push({
+                x,
+                w: barW,
+                color: lane >= 0 ? TRACK_COLORS[lane] : this._accent
+            });
+        }
+
+        // 频谱只占用判定线以下的触控区，避免穿过音符下落阅读区
+        this._eqTop = Math.round(this._judgmentY + 30 * this._hudScale);
+        this._eqBottom = Math.round(this.canvasHeight - this._safeBottom - 8);
     }
 
     /** 画布 CSS 坐标 → 触控轨道；轨间缝隙从相邻轨道中心的中点分界。 */
@@ -246,6 +320,163 @@ class Renderer {
         this.resize();
     }
 
+    // ========== 律动状态（由 main.js 每帧调用，暂停时不推进） ==========
+    /**
+     * 推进频谱、节拍、打击回弹与 HUD 缓动。
+     * 只读取游戏时钟与音频分析数据，不参与判定，也不会创造独立时间轴。
+     * @param {number} currentTime 谱面时间（ms），倒计时期间为负
+     */
+    updateRhythm(currentTime) {
+        const dt = this._dt;
+        if (dt === 0) return;
+        const targetScore = gameState.calculateFinalScore().finalScore || 0;
+        const targetHealth = gameState.health || 0;
+
+        // 连击弹跳与里程碑：放在这里而不是 drawHUD，暂停时才能真正冻结
+        if (gameState.combo > this._lastCombo) {
+            this._comboPop = 1;
+            if (gameState.combo >= 50
+                && Math.floor(gameState.combo / 50) > Math.floor(this._lastCombo / 50)) {
+                this._milestoneCombo = Math.floor(gameState.combo / 50) * 50;
+                this._milestoneAge = 0;
+                this._triggerBeat();
+            }
+        }
+        if (gameState.combo <= 0) this._comboPop = 0;
+        this._lastCombo = gameState.combo;
+        if (this._comboPop > 0) this._comboPop = Math.max(0, this._comboPop - 0.07 * (dt / 16.67));
+
+        // 减少动态效果：保留判定与轨道闪光，关闭环境律动和数值缓动
+        if (!this._motionEnabled) {
+            this._comboPop = 0;
+            this._lastCombo = gameState.combo;
+            this._beat = 0;
+            this._bars.fill(0);
+            this._displayScore = targetScore;
+            this._displayHealth = targetHealth;
+            this._healthGhost = targetHealth;
+            this._ringAge.fill(Infinity);
+            this._milestoneAge = Infinity;
+            return;
+        }
+
+        // 分数与血量缓动：只影响显示，暂停面板/结算仍用真实值
+        if (this._displayScore === null) this._displayScore = targetScore;
+        this._displayScore += (targetScore - this._displayScore) * (1 - Math.exp(-dt / 90));
+        if (Math.abs(targetScore - this._displayScore) < 0.6) this._displayScore = targetScore;
+
+        if (this._displayHealth === null) {
+            this._displayHealth = targetHealth;
+            this._healthGhost = targetHealth;
+        }
+        this._displayHealth += (targetHealth - this._displayHealth) * (1 - Math.exp(-dt / 65));
+        if (Math.abs(targetHealth - this._displayHealth) < 0.05) this._displayHealth = targetHealth;
+
+        if (this._healthGhost === null) this._healthGhost = targetHealth;
+        if (targetHealth < this._healthGhost) {
+            // 受伤残影：比主血条慢一拍回落，让扣血方向可读
+            this._healthGhost += (targetHealth - this._healthGhost) * (1 - Math.exp(-dt / 360));
+            if (this._healthGhost - targetHealth < 0.05) this._healthGhost = targetHealth;
+        } else {
+            this._healthGhost = targetHealth;
+        }
+
+        let data = null;
+        if (currentTime >= 0 && typeof audioEngine !== 'undefined' && audioEngine
+            && typeof audioEngine.getVisualizerData === 'function') {
+            data = audioEngine.getVisualizerData();
+        }
+
+        if (data && data.length > 0) {
+            const comp = (typeof audioEngine.visualizerGainComp === 'number')
+                ? audioEngine.visualizerGainComp : 1;
+            const n = this._bars.length;
+            const binMax = Math.max(2, Math.floor(data.length * 0.72));
+
+            for (let i = 0; i < n; i++) {
+                // 对数感映射：低频占更多柱，高频铺开后段
+                const pos = 1 + (binMax - 1) * Math.pow((i + 1) / n, 1.8);
+                const idx = Math.min(data.length - 1, Math.max(0, Math.round(pos)));
+                const raw = Math.min(1, (data[idx] / 255) * comp * 0.8);
+                const target = 0.035 + Math.pow(raw, 0.85) * 0.965;
+                const tau = target > this._bars[i] ? 55 : 210;
+                this._bars[i] += (target - this._bars[i]) * (1 - Math.exp(-dt / tau));
+            }
+
+            let bassSum = 0;
+            let bassCount = 0;
+            const bassBins = Math.min(6, data.length - 1);
+            for (let i = 1; i <= bassBins; i++) {
+                bassSum += data[i];
+                bassCount++;
+            }
+            const bassRaw = bassCount
+                ? Math.min(1, (bassSum / bassCount / 255) * comp * 0.95) : 0;
+
+            // 低频起音检测：鼓点落下时给轨道外框一次短脉冲
+            if (bassRaw > 0.26 && bassRaw - this._prevBassRaw > 0.045
+                && Math.abs(currentTime - this._lastOnsetAt) > 105) {
+                this._triggerBeat();
+                this._lastOnsetAt = currentTime;
+            }
+            this._prevBassRaw = bassRaw;
+            this._fallbackBeat = -1;
+        } else {
+            // 没有可用频谱时（倒计时 / 浏览器不支持 analyser）用秒针或 BPM 生成呼吸
+            const bpm = Math.max(30, Math.min(300, CONFIG.bpm || 120));
+            const beatMs = 60000 / bpm;
+            let energy;
+            if (currentTime < 0) {
+                const sec = Math.ceil(-currentTime / 1000);
+                if (sec !== this._countdownSecond) {
+                    this._countdownSecond = sec;
+                    this._triggerBeat();
+                }
+                const frac = Math.max(0, Math.min(1, (-currentTime / 1000) % 1));
+                energy = 0.22 + 0.5 * (1 - frac);
+            } else {
+                this._countdownSecond = null;
+                // 无频谱时使用谱面时间做装饰性脉冲，不用于判定。
+                const beatClock = currentTime;
+                const beatIndex = Math.floor(beatClock / beatMs);
+                if (beatIndex !== this._fallbackBeat) {
+                    this._fallbackBeat = beatIndex;
+                    this._triggerBeat();
+                }
+                const frac = (Math.max(0, beatClock) % beatMs) / beatMs;
+                energy = 0.12 + 0.35 * Math.pow(1 - frac, 3);
+            }
+
+            // 合成频谱：中间高、两侧低，再叠加缓慢漂移，形状近似真实低频分布
+            const n = this._bars.length;
+            const drift = currentTime / 900;
+            for (let i = 0; i < n; i++) {
+                const center = 1 - Math.abs(i / Math.max(1, n - 1) - 0.5) * 2;
+                const target = 0.05 + energy * 0.42 * center
+                    + 0.04 * (0.5 + 0.5 * Math.sin(drift + i * 0.55));
+                this._bars[i] += (target - this._bars[i]) * (1 - Math.exp(-dt / 90));
+            }
+        }
+
+        // 节拍脉冲与外框高亮衰减
+        this._beat = Math.max(0, this._beat - dt / 260);
+
+        if (this._milestoneAge !== Infinity) {
+            this._milestoneAge += dt;
+            if (this._milestoneAge > 900) this._milestoneAge = Infinity;
+        }
+        for (let i = 0; i < this._ringAge.length; i++) {
+            if (this._ringAge[i] !== Infinity) {
+                this._ringAge[i] += dt;
+                if (this._ringAge[i] > 320) this._ringAge[i] = Infinity;
+            }
+        }
+    }
+
+    _triggerBeat() {
+        this._beat = 1;
+    }
+
     // ========== 背景（扁平纯色） ==========
     drawBackground(time) {
         const ctx = this.ctx;
@@ -268,9 +499,11 @@ class Renderer {
 
         if (this.skin && this.spritesReady) {
             this._drawSkinTracks();
+            this._drawHitRings();
             return;
         }
         this._drawFlatTracks();
+        this._drawHitRings();
     }
 
     /** Malody 皮肤：背景板 / 底部填充 / 键位列 / 按下列 / 接收器 / 判定线 */
@@ -294,6 +527,7 @@ class Renderer {
         for (let i = 0; i < positions.length; i++) {
             skin.drawLaneSprite(ctx, '_bottom', i, positions[i].x, jy, trackW, bottomH);
         }
+        this._drawEqualizer();
 
         // 3. 键位列：从判定线一路铺到屏幕顶部。
         // 皮肤脚本里的 key 贴图高度是 300（设计单位），若按原高绘制会在画面中部留下
@@ -334,6 +568,7 @@ class Renderer {
                 ctx.fillRect(fieldX, Math.round(jy) - 1, fieldW, 2);
             }
         }
+        this._drawRhythmFrame(fieldX, fieldW);
     }
 
     /** 内置扁平皮肤：纯色块轨道 */
@@ -353,6 +588,9 @@ class Renderer {
         for (let i = 1; i < positions.length; i += 2) {
             ctx.fillRect(positions[i].x, 0, trackW, h);
         }
+
+        // 底部频谱：只铺在判定线以下，作为音乐可视化与触控区的环境层次
+        this._drawEqualizer();
 
         // 按下 / 命中 / 漏击：实色块提示（不使用渐变光柱）
         for (let i = 0; i < positions.length; i++) {
@@ -432,6 +670,98 @@ class Renderer {
                 ctx.fillText(TRACK_KEYS[i], positions[i].cx, judgmentY + 20 * s);
             }
         }
+
+        this._drawRhythmFrame(fieldX, fieldW);
+    }
+
+    /** 判定线以下的实时频谱：扁平色块，按所在轨道取色。 */
+    _drawEqualizer() {
+        if (!this._motionEnabled || this._eqBars.length === 0) return;
+        if (this._eqBottom - this._eqTop < 8) return;
+
+        const ctx = this.ctx;
+        const maxH = Math.max(4, (this._eqBottom - this._eqTop) * 0.84);
+        const beat = this._beat;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+        ctx.fillRect(10, this._eqBottom, Math.max(0, this.canvasWidth - 20), 1);
+
+        for (let i = 0; i < this._eqBars.length; i++) {
+            const bar = this._eqBars[i];
+            const v = this._bars[i] || 0;
+            const barH = Math.max(2, Math.round(maxH * (0.06 + v * 0.94)));
+
+            ctx.fillStyle = bar.color;
+            ctx.globalAlpha = 0.06 + v * 0.2 + beat * 0.035;
+            ctx.fillRect(bar.x, this._eqBottom - barH, bar.w, barH);
+
+            // 柱顶加亮 2px，让频谱有明确的“峰”
+            ctx.globalAlpha = 0.1 + v * 0.38;
+            ctx.fillRect(bar.x, this._eqBottom - barH, bar.w, 2);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    /** 轨道四角的节拍框：低频起音时向外弹开，连击里程碑时闪白。 */
+    _drawRhythmFrame(fieldX, fieldW) {
+        const ctx = this.ctx;
+        const pulse = this._motionEnabled ? this._beat : 0;
+        const milestone = this._milestoneAge < 260
+            ? 1 - this._milestoneAge / 260 : 0;
+        const alpha = 0.14 + pulse * 0.42 + milestone * 0.25;
+        const len = 12 + pulse * 10;
+        const thick = 2;
+        const x1 = Math.round(fieldX) + 1;
+        const x2 = Math.round(fieldX + fieldW) - 1;
+        const y1 = Math.round(this._safeTop + 8 * this._hudScale);
+        const y2 = Math.round(this.canvasHeight - this._safeBottom - 8);
+
+        ctx.fillStyle = milestone > 0.35 ? '#ffffff' : this._accent;
+        ctx.globalAlpha = Math.min(0.85, alpha);
+        // 左上
+        ctx.fillRect(x1, y1, len, thick);
+        ctx.fillRect(x1, y1, thick, len);
+        // 右上
+        ctx.fillRect(x2 - len, y1, len, thick);
+        ctx.fillRect(x2 - thick, y1, thick, len);
+        // 左下
+        ctx.fillRect(x1, y2 - thick, len, thick);
+        ctx.fillRect(x1, y2 - len, thick, len);
+        // 右下
+        ctx.fillRect(x2 - len, y2 - thick, len, thick);
+        ctx.fillRect(x2 - thick, y2 - len, thick, len);
+        ctx.globalAlpha = 1;
+    }
+
+    /** 命中回弹：判定线处扩散的扁平方形准星。 */
+    _drawHitRings() {
+        if (!this._motionEnabled) return;
+        const ctx = this.ctx;
+        const jy = this._judgmentY;
+        for (let i = 0; i < this._ringAge.length; i++) {
+            const age = this._ringAge[i];
+            if (age === Infinity) continue;
+            const t = Math.min(1, age / 320);
+            const ease = 1 - Math.pow(1 - t, 3);
+            const w = CONFIG.trackWidth * (0.38 + ease * 0.58);
+            const h = 12 + ease * 34;
+            const cx = this.trackPositions[i].cx;
+
+            ctx.globalAlpha = (1 - t) * (1 - t) * 0.72;
+            ctx.strokeStyle = this._ringColor[i];
+            ctx.lineWidth = 2.2 * (1 - t) + 0.6;
+            ctx.beginPath();
+            ctx.roundRect(cx - w / 2, jy - h / 2, w, h, 3);
+            ctx.stroke();
+
+            // 向两侧飞出的短刻度，强调“打中了”
+            const spread = Math.min(8 + ease * 26, (CONFIG.trackWidth - w) / 2);
+            ctx.globalAlpha *= 0.8;
+            ctx.fillStyle = this._ringColor[i];
+            ctx.fillRect(cx - w / 2 - spread, jy - 1, 6, 2);
+            ctx.fillRect(cx + w / 2 + spread - 6, jy - 1, 6, 2);
+        }
+        ctx.globalAlpha = 1;
     }
 
     // ========== 音符绘制 (可见性裁剪 + 精确几何提前终止) ==========
@@ -507,7 +837,7 @@ class Renderer {
 
                 // Miss: 头部已过屏幕底部且未命中
                 if (rawY > canvasH + 100 && !note.hit) {
-                    if (!note.missed) {
+                    if (this._dt > 0 && !note.missed) {
                         note.missed = true;
                         note.hit = true;
                         note.holdActive = false;
@@ -531,7 +861,7 @@ class Renderer {
                 const visYTop = yTop > -50 ? yTop : -50;
                 const visYBot = yBottom < canvasH ? yBottom : canvasH;
 
-                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], note.holdActive, holdProgress, note.track);
+                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], note.holdActive, holdProgress, note.track, currentTime);
                 visibleCount++;
                 continue;
             }
@@ -546,7 +876,7 @@ class Renderer {
 
             // 已过底部 → Miss
             if (rawY > canvasH + 100) {
-                if (!note.missed) {
+                if (this._dt > 0 && !note.missed) {
                     note.missed = true;
                     note.hit = true;
                     gameState.miss++;
@@ -576,7 +906,7 @@ class Renderer {
      * @param {number} holdProgress - 按住进度 0~1（未按住时为 0）
      * @param {number} [track] - 轨道索引（皮肤按轨道取贴图）
      */
-    _drawHoldBody(x, yTop, yBottom, color, isActive, holdProgress = 0, track = 0) {
+    _drawHoldBody(x, yTop, yBottom, color, isActive, holdProgress, track, currentTime) {
         const skin = this.skin;
         if (skin && this.spritesReady) {
             this._drawSkinHoldBody(x, yTop, yBottom, isActive, holdProgress, track);
@@ -607,6 +937,21 @@ class Renderer {
                 const litH = Math.max(2, bodyHeight * Math.min(1, holdProgress));
                 ctx.fillStyle = _withAlpha(color, 0.75);
                 ctx.fillRect(bodyX + 1, yBottom - litH, bodyW - 2, litH);
+
+                // 进度前沿：1px 实色亮线，跟着手指/按键推进
+                ctx.fillStyle = _withAlpha(color, 0.95);
+                ctx.fillRect(bodyX + 1, yBottom - litH, bodyW - 2, 1);
+            }
+
+            // 长条内部流动刻度：向判定线方向缓慢推进，强调“正在被消耗”
+            if (this._motionEnabled && isActive) {
+                const gap = 40;
+                const flow = (Math.max(0, currentTime) / 12) % gap;
+                const end = Math.min(bodyHeight - 1, gap * 8);
+                ctx.fillStyle = _withAlpha(color, 0.3);
+                for (let offset = flow; offset <= end; offset += gap) {
+                    ctx.fillRect(bodyX + 2, bodyTop + offset, bodyW - 4, 1);
+                }
             }
         }
 
@@ -739,12 +1084,47 @@ class Renderer {
         ctx.arc(centerX, centerY, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
         ctx.stroke();
 
-        // 数字
+        // 整秒切换：数字弹一下，同时从圆环向外扩散一圈细线
+        const number = Math.ceil(secondsLeft);
+        const tick = this._motionEnabled ? Math.max(0, 1 - (number - secondsLeft) / 0.2) : 0;
+        if (tick > 0.015) {
+            const spread = (1 - tick) * 36;
+            ctx.globalAlpha = tick * 0.35;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius + spread, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        }
+
+        // 四角短框随整秒向外弹开，和数字同步
+        const pop = tick * tick * tick;
+        const corner = 10 + pop * 7;
+        const offset = pop * 4;
+        const c1 = centerX - box + 4 - offset;
+        const c2 = centerX + box - 4 + offset;
+        const r1 = centerY - box + 4 - offset;
+        const r2 = centerY + box - 4 + offset;
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.5 + pop * 0.4;
+        ctx.fillRect(c1, r1, corner, 2);
+        ctx.fillRect(c1, r1, 2, corner);
+        ctx.fillRect(c2 - corner, r1, corner, 2);
+        ctx.fillRect(c2 - 2, r1, 2, corner);
+        ctx.fillRect(c1, r2 - 2, corner, 2);
+        ctx.fillRect(c1, r2 - corner, 2, corner);
+        ctx.fillRect(c2 - corner, r2 - 2, corner, 2);
+        ctx.fillRect(c2 - 2, r2 - corner, 2, corner);
+        ctx.globalAlpha = 1;
+
+        // 数字：整秒瞬间放大后回落
+        const numScale = 1 + pop * 0.18;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = `800 ${fontSize}px ${HUD_MONO_STACK}`;
+        ctx.font = `800 ${fontSize * numScale}px ${HUD_MONO_STACK}`;
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(Math.ceil(secondsLeft).toString(), centerX, centerY + 2 * s);
+        ctx.fillText(String(number), centerX, centerY + 2 * s);
 
         // 状态标签
         ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
@@ -794,10 +1174,12 @@ class Renderer {
         l.active = true;
         l.timeElapsed = 0;
 
-        // 命中反馈：轨道光柱 + 判定线脉冲
+        // 命中反馈：轨道光柱 + 判定线脉冲 + 方框回弹
         this._laneFlash[track] = 1;
         this._laneFlashColor[track] = TRACK_COLORS[track];
         this._hitPulse = 1;
+        this._ringAge[track] = 0;
+        this._ringColor[track] = TRACK_COLORS[track];
     }
 
     drawLasers() {
@@ -946,9 +1328,11 @@ class Renderer {
         j.alpha = 1; j.bounce = 1.0; j.active = true;
         j.timeElapsed = 0;
 
-        // 漏击：轨道短暂泛红提示
+        // 漏击：轨道短暂泛红提示 + 红色方框回弹
         this._laneFlash[track] = 0.85;
         this._laneFlashColor[track] = '#ff6b6b';
+        this._ringAge[track] = 0;
+        this._ringColor[track] = '#ff6b6b';
     }
 
     drawJudgments() {
@@ -1009,19 +1393,7 @@ class Renderer {
         const s = this._hudScale;
         const w = this.canvasWidth;
         const h = this.canvasHeight;
-        const now = performance.now();
-        // 暂停 / 恢复倒计时期间：进度按冻结时刻显示，避免进度条倒计时中前跳
-        const frozen = gameState.paused || gameState.resumeCountdownUntil > 0;
-        const currentTime = frozen
-            ? (gameState.pauseSnapshotTime || 0)
-            : Math.max(0, now - gameState.startTime);
-        const scale = this._dt / 16.67;
-
-        // 连击弹跳动画状态
-        if (gameState.combo > this._lastCombo) this._comboPop = 1;
-        if (gameState.combo <= 0) this._comboPop = 0;
-        this._lastCombo = gameState.combo;
-        if (this._comboPop > 0) this._comboPop = Math.max(0, this._comboPop - 0.07 * scale);
+        const currentTime = Math.max(0, gameState.currentTime());
 
         const left = this._safeLeft + 26 * s;
         const top = this._safeTop + 22 * s;
@@ -1035,7 +1407,7 @@ class Renderer {
         const healthInitial = CONFIG.health.initial || 100;
         const healthRatio = Math.max(0, Math.min(1, gameState.health / healthInitial));
         if (healthRatio < 0.3) {
-            const pulse = 0.35 + 0.35 * Math.sin(now / 170);
+            const pulse = this._motionEnabled ? 0.35 + 0.35 * Math.sin(currentTime / 170) : 0.45;
             ctx.strokeStyle = `rgba(255, 90, 96, ${(pulse * (1 - healthRatio / 0.3)).toFixed(3)})`;
             ctx.lineWidth = 3;
             ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
@@ -1049,7 +1421,9 @@ class Renderer {
         ctx.fillStyle = FLAT_PALETTE.textDim;
         ctx.fillText('SCORE', left, top);
 
-        const scoreText = gameState.calculateFinalScore().finalScore.toLocaleString();
+        const scoreText = Math.round(this._displayScore === null
+            ? gameState.calculateFinalScore().finalScore
+            : this._displayScore).toLocaleString();
         ctx.font = `800 ${30 * s}px ${HUD_MONO_STACK}`;
         ctx.fillStyle = FLAT_PALETTE.text;
         ctx.fillText(scoreText, left, top + 13 * s);
@@ -1100,9 +1474,23 @@ class Renderer {
         ctx.fillStyle = '#1b1b26';
         ctx.fillRect(hX, hY, healthW, healthH);
 
-        if (healthRatio > 0) {
+        const displayHealth = this._displayHealth === null ? gameState.health : this._displayHealth;
+        const ghostHealth = this._healthGhost === null ? displayHealth : this._healthGhost;
+        const displayRatio = Math.max(0, Math.min(1, displayHealth / healthInitial));
+        const ghostRatio = Math.max(0, Math.min(1, ghostHealth / healthInitial));
+
+        // 受伤残影：先画慢一拍的红条，再用当前血量盖住，留下红色尾巴
+        if (ghostRatio > displayRatio + 0.001) {
+            ctx.fillStyle = 'rgba(255, 107, 107, 0.55)';
+            ctx.fillRect(hX, hY, Math.round(healthW * ghostRatio), healthH);
+        }
+        if (displayRatio > 0) {
+            const displayW = Math.max(1, Math.round(healthW * displayRatio));
             ctx.fillStyle = healthColor;
-            ctx.fillRect(hX, hY, Math.round(healthW * healthRatio), healthH);
+            ctx.fillRect(hX, hY, displayW, healthH);
+            // 血量前沿：节拍时轻微加亮
+            ctx.fillStyle = `rgba(255, 255, 255, ${0.55 + this._beat * 0.3})`;
+            ctx.fillRect(hX + displayW - 1, hY, 1, healthH);
         }
 
         // 30% 危险刻度 + 1px 外框
@@ -1135,7 +1523,7 @@ class Renderer {
         // ---- 中央连击：纯色数字，命中时放大 ----
         // 恢复倒计时期间隐藏连击，避免与 3-2-1 圆环重叠
         if (gameState.combo > 0 && !(gameState.resumeCountdownUntil > 0)) {
-            const pop = 1 + this._comboPop * 0.16;
+            const pop = 1 + (this._motionEnabled ? this._comboPop * 0.16 : 0);
             const size = 44 * s * pop;
             const comboX = w / 2;
             const comboY = h * 0.34;
@@ -1149,13 +1537,53 @@ class Renderer {
             ctx.fillText(gameState.combo, comboX, comboY);
 
             ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
-            ctx.fillStyle = hotCombo ? 'rgba(255, 212, 59, 0.75)' : FLAT_PALETTE.textDim;
+            ctx.globalAlpha = 0.7 + (this._motionEnabled ? this._beat * 0.3 : 0);
+            ctx.fillStyle = hotCombo ? '#ffd43b' : FLAT_PALETTE.textDim;
             ctx.fillText('C O M B O', comboX, comboY + size * 0.62);
+            ctx.globalAlpha = 1;
+
+            this._drawComboMilestone(comboX, comboY, size, s);
 
             ctx.textBaseline = 'top';
         }
 
         ctx.restore();
+    }
+
+    /** 连击里程碑：数字上下展开两条横线，不遮挡数字本身。 */
+    _drawComboMilestone(cx, cy, size, s) {
+        if (!this._motionEnabled || this._milestoneAge === Infinity) return;
+        const t = Math.min(1, this._milestoneAge / 900);
+        const ease = 1 - Math.pow(1 - t, 3);
+        const ctx = this.ctx;
+        const half = size * 0.65 + ease * 110;
+        const y1 = cy - size * 0.62;
+        const y2 = cy + size * 0.62;
+
+        ctx.strokeStyle = '#ffd43b';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = (1 - t) * 0.45;
+        ctx.beginPath();
+        ctx.moveTo(cx - half, y1);
+        ctx.lineTo(cx + half, y1);
+        ctx.moveTo(cx - half, y2);
+        ctx.lineTo(cx + half, y2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffd43b';
+        ctx.globalAlpha = (1 - t) * 0.75;
+        ctx.fillRect(cx - half, y1 - 4, 2, 8);
+        ctx.fillRect(cx + half - 2, y1 - 4, 2, 8);
+        ctx.fillRect(cx - half, y2 - 4, 2, 8);
+        ctx.fillRect(cx + half - 2, y2 - 4, 2, 8);
+
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.font = `800 ${8.5 * s}px ${HUD_FONT_STACK}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`MILESTONE ×${this._milestoneCombo}`, cx, y1 - 7);
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = 1;
     }
 
     /** 顶部细进度条：扁平实色条 + 方形播放头 */
@@ -1190,9 +1618,10 @@ class Renderer {
         ctx.fillStyle = this._accent;
         ctx.fillRect(x, y, playedW, barH);
 
-        // 播放头：2px 方形块
+        // 播放头：2px 方形块，节拍时上下轻微伸展
+        const head = this._motionEnabled ? this._beat : 0;
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(x + playedW - 1, y - 2, 2, barH + 4);
+        ctx.fillRect(x + playedW - 1, y - 2 - head, 2 + head * 2, barH + 4 + head * 2);
     }
 
     /** 判定偏移条：显示最近一次打击的 EARLY / LATE 偏差（扁平刻度） */
@@ -1254,15 +1683,7 @@ class Renderer {
     drawSkipIntroHint() {
         // 触屏设备使用 DOM 按钮，避免画布提示无法点击
         if (IS_TOUCH_DEVICE) return;
-        if (gameState.screen !== 'game' || gameState.paused) return;
-        if (!audioEngine.isPlaying || audioEngine._paused) return;
-
-        const sceneTime = performance.now() - gameState.startTime;
-        if (sceneTime < 0 || sceneTime > 10000) return;
-
-        const notes = gameState.notes;
-        if (!notes || notes.length === 0) return;
-        if (sceneTime >= notes[0].time - 5000) return;
+        if (!ui || !ui._canSkipIntro()) return;
 
         const ctx = this.ctx;
         const s = this._hudScale;
@@ -1440,6 +1861,21 @@ class Renderer {
         this._hitPulse = 0;
         this._comboPop = 0;
         this._lastCombo = 0;
+
+        // 律动：清空频谱余量、打击回弹与缓动值，重开时不带上一局残影
+        this._beat = 0;
+        this._prevBassRaw = 0;
+        this._fallbackBeat = -1;
+        this._countdownSecond = null;
+        this._lastOnsetAt = -Infinity;
+        this._bars.fill(0);
+        this._ringAge.fill(Infinity);
+        this._ringColor = TRACK_COLORS.slice();
+        this._milestoneAge = Infinity;
+        this._milestoneCombo = 0;
+        this._displayScore = null;
+        this._displayHealth = null;
+        this._healthGhost = null;
     }
 
     // ========== 触控点显示 (移动端) ==========

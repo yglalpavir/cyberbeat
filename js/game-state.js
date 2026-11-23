@@ -14,17 +14,16 @@ class GameState {
         this.great = 0;
         this.miss = 0;
         this.health = CONFIG.health.initial;
-        this.startTime = 0;
+        this.timingOffset = 0;         // 玩家校准（ms），正值使音符更晚到达
         this.notes = [];
         this.particles = [];
         this.lasers = [];
         this.judgments = [];
         this.pressedKeys = new Set();
         this.isPlaying = false;
-        this.beatIndex = 0;
         this.performanceHistory = [];
         this.totalNotesProcessed = 0;
-        this.intervalStartTime = 0;
+        this.intervalStartTime = 0;   // 谱面时间（ms）
         this.intervalStats = { perfect: 0, great: 0, miss: 0 };
         // Hold 长条跟踪：每个轨道当前按住的 hold note
         this.activeHolds = [null, null, null, null];
@@ -32,10 +31,11 @@ class GameState {
         this.holdReleaseTimes = [0, 0, 0, 0];
         // 暂停状态
         this.paused = false;
-        this.pauseStartedAt = 0;       // 暂停时的 performance.now()
         this.pauseSnapshotTime = 0;    // 暂停时的场景时间（ms）
-        // 恢复倒计时（暂停后重新开始前给玩家缓冲）
+        this.initialCountdownFrozen = false;
+        // 只有恢复倒计时使用墙钟；谱面和伴奏均停在音频时钟上。
         this.resumeCountdownUntil = 0; // performance.now() 时间戳；为 0 表示无恢复倒计时
+        this.resumeCountdownRemaining = null; // 切后台时保存；null 表示无待续倒计时
         // 最近一次打击的时序偏差（ms，负=偏早，正=偏晚），用于游玩界面判定偏移条
         this.lastHitOffset = 0;
         this.lastHitAt = 0;            // performance.now() 时间戳
@@ -45,7 +45,8 @@ class GameState {
      * 获取当前场景时间（ms）：游戏开始后经过的时间（含全局 offset 校准）
      */
     currentTime() {
-        return performance.now() - this.startTime;
+        if (this.paused || this.resumeCountdownUntil > 0 || this.initialCountdownFrozen) return this.pauseSnapshotTime;
+        return audioEngine.musicTimeMs() - this.timingOffset;
     }
     
     calculateTotalAcc() {
@@ -113,7 +114,7 @@ class GameState {
         }
         
         this.performanceHistory.push({
-            time: performance.now() - this.startTime,
+            time: this.currentTime(),
             intervalAcc: intervalAcc,
             totalAcc: this.calculateTotalAcc()
         });
