@@ -23,9 +23,10 @@ const SKIN_DRAW = {
     showBar: false
 };
 
-// 触屏设备的判定线位置：占「可用高度（扣掉触控栏与安全区）」的比例。
-// 手机上判定线过高会挤压读谱空间，过低则判定区被拇指/触控栏挡住，0.70 是两者的折中。
+// 触屏判定线按扣除安全区与拇指余量后的高度计算。
 const MOBILE_HIT_FRACTION = 0.78;
+const TOUCH_EDGE_PADDING = 16; // 外轨边缘放宽，横屏大面积留白仍不可触发打击
+const TOUCH_SLIDE_SLOP = 6;    // 滑动越过轨道分界后再走几像素，避免在边界反复换轨
 
 class Renderer {
     constructor(canvas, ctx) {
@@ -40,7 +41,6 @@ class Renderer {
         this._safeRight = 0;
         this._safeBottom = 0;
         this._safeLeft = 0;
-        this._controlsHeight = 0;
 
         // 游玩界面视觉状态
         this._laneFlash = [0, 0, 0, 0];        // 命中/漏击时的轨道闪光强度 0~1
@@ -157,9 +157,6 @@ class Renderer {
             ? Math.min(this.skin.layout.barWidth * this._skinScale, this.canvasWidth - 4)
             : this._fieldWidth;
 
-        // 让底部触控键与 playfield 同宽（CSS 读取此变量）
-        document.documentElement.style.setProperty('--playfield-width', this._fieldWidth + 'px');
-
         // 预计算轨道坐标
         this.trackPositions.length = 0;
         for (let i = 0; i < CONFIG.trackCount; i++) {
@@ -173,7 +170,6 @@ class Renderer {
         }
 
         // 判定线：取消底部 1234 按键后不再为触控栏预留高度，只避让安全区与拇指区
-        this._controlsHeight = 0;
         const reservedBottom = this._safeBottom + 24;
         const availableHeight = Math.max(180, this.canvasHeight - reservedBottom);
         // 内置皮肤用 CONFIG.judgmentLineY；Malody 皮肤由脚本的 HITPOSITION 决定（越大越靠上）
@@ -181,7 +177,7 @@ class Renderer {
             ? reservedBottom + (this.canvasHeight - reservedBottom) * this.skin.hitFraction
             : this.canvasHeight * CONFIG.judgmentLineY;
 
-        // 触屏设备：整屏可点，判定线可以更靠下（读谱空间更大），只留出拇指/手势条余量
+        // 触屏仍可在判定线上下点按，只为拇指和手势条保留余量
         if (IS_TOUCH_DEVICE) {
             const mobileTargetY = reservedBottom + availableHeight * MOBILE_HIT_FRACTION;
             desiredY = Math.min(desiredY, mobileTargetY);
@@ -205,6 +201,32 @@ class Renderer {
         }
 
         this.ctx.imageSmoothingEnabled = false;
+    }
+
+    /** 画布 CSS 坐标 → 触控轨道；轨间缝隙从相邻轨道中心的中点分界。 */
+    getTouchTrack(x, previousTrack = null) {
+        const lanes = this.trackPositions;
+        if (lanes.length === 0 || !Number.isFinite(x)) return null;
+
+        const last = lanes.length - 1;
+        const left = Math.max(this._safeLeft, lanes[0].x - TOUCH_EDGE_PADDING);
+        const right = Math.min(this.canvasWidth - this._safeRight,
+            lanes[last].x + CONFIG.trackWidth + TOUCH_EDGE_PADDING);
+        if (x < left || x > right) return null;
+
+        if (previousTrack !== null && lanes[previousTrack]) {
+            const center = lanes[previousTrack].cx;
+            const min = previousTrack === 0 ? left
+                : (lanes[previousTrack - 1].cx + center) / 2 - TOUCH_SLIDE_SLOP;
+            const max = previousTrack === last ? right
+                : (center + lanes[previousTrack + 1].cx) / 2 + TOUCH_SLIDE_SLOP;
+            if (x >= min && x <= max) return previousTrack;
+        }
+
+        for (let i = 0; i < last; i++) {
+            if (x < (lanes[i].cx + lanes[i + 1].cx) / 2) return i;
+        }
+        return last;
     }
 
     /** 设置游戏内顶部显示的曲目信息（开始游戏时由 UI 调用） */

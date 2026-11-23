@@ -98,6 +98,13 @@ html.is-touch body {
 /* ============================================================
    Canvas
    ============================================================ */
+/* 旧版页面仍有按键栏时，也不允许横屏规则重新显示它。 */
+#mobileControls,
+.mobile-btns,
+.mobile-btn {
+    display: none !important;
+}
+
 #gameCanvas {
     display: block;
     position: absolute;
@@ -3088,7 +3095,7 @@ html.is-touch .pause-hint {
     .lb-record { padding: 7px 10px; min-height: 38px; }
     .lb-card .btn { min-height: 38px; }
 
-    /* ===== 游玩：触控栏对齐轨道区，性能面板让开 HUD ===== */
+    /* ===== 游玩：性能面板让开 HUD ===== */
     #perfMonitor {
         top: auto;
         bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
@@ -3114,7 +3121,7 @@ html.is-touch .pause-hint {
     }
 }
 
-/* 非触屏设备（鼠标精确指针）永不显示触控键，即使窗口矮/窄 */
+/* 桌面用快捷键暂停，不显示触屏暂停按钮。 */
 html.is-pointer-fine .game-pause-btn { display: none; }
 
 /* 游玩中隐藏鼠标指针，减少视觉干扰；暂停时恢复 */
@@ -3127,7 +3134,7 @@ html.is-pointer-fine body.game-active:not(.paused) {
    ============================================================ */
 @media (max-width: 380px) and (orientation: portrait) {
     html { font-size: 14px; }
-
+
 
     #perfMonitor { bottom: calc(env(safe-area-inset-bottom, 0px) + 6px); }
 
