@@ -104,6 +104,7 @@ class SettingsStore {
         if (s.skin !== undefined && typeof skinMode !== 'undefined') {
             skinMode = s.skin === 'malody' ? 'malody' : 'builtin';
         }
+        // 旧存档的难度仅用于未设置过难度的 MIDI 曲目。
         if (s.difficulty !== undefined) {
             selectedDifficulty = s.difficulty;
         }
@@ -125,7 +126,6 @@ class SettingsStore {
             volume: currentVolume,
             noteStyle: noteStyle,
             skin: typeof skinMode !== 'undefined' ? skinMode : 'builtin',
-            difficulty: selectedDifficulty,
             audioOffset: typeof audioOffsetMs !== 'undefined' ? audioOffsetMs : 0,
             touchFeedback: typeof touchFeedbackEnabled !== 'undefined' ? touchFeedbackEnabled : true
         });

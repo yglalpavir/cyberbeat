@@ -31,6 +31,10 @@ class AudioEngine {
         // 暂停支持
         this._paused = false;
         this._mode = null;          // 'midi' | 'preset' | 'file'
+        // 打击音效：预渲染的短促机械点击；每次只需一个 BufferSource + 一个 Gain
+        this._hitBuffers = new Map();   // type → AudioBuffer（按配置懒生成）
+        this._hitBufferConfigKey = null; // 只对采样参数签名，支持无配置文件的 fallback
+        this._hitVoices = 0;
 
     }
     
@@ -174,41 +178,103 @@ class AudioEngine {
         osc.stop(when + duration + midiCfg.noteStopPadding);
     }
     
+    /**
+     * 打击音效：立即在 AudioContext 当前时间播放一段预渲染的机械点击。
+     * 只接 masterGain（共享玩家音量与 limiter），不触碰音乐总线与谱面时钟。
+     * @param {'perfect'|'great'|'miss'|'holdEnd'} type
+     */
     playHitSound(type) {
-        if (!this.context) return;
+        if (!this.context || !this.masterGain || this.context.state !== 'running') return;
         const hitCfg = getHitSoundConfig();
-        // Oscillator 不能复用（只能 start 一次），必须每次新建
-        const osc = this.context.createOscillator();
-        // Gain 可以池化复用
-        const gain = this._getGain();
-        osc.type = 'square';
-        if (type === 'perfect') osc.frequency.value = hitCfg.perfectFreq;
-        else if (type === 'great') osc.frequency.value = hitCfg.greatFreq;
-        else osc.frequency.value = hitCfg.missFreq;
-        const now = this.context.currentTime;
-        gain.gain.cancelScheduledValues(now);
-        gain.gain.setValueAtTime(hitCfg.gain, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + hitCfg.duration);
-        osc.connect(gain);
-        gain.connect(this.masterGain);
-        osc.start(now);
-        osc.stop(now + hitCfg.duration);
-        // Oscillator 用完即弃，Gain 归还池
-        osc.onended = () => {
-            this._releaseGain(gain);
-            try { gain.disconnect(); } catch(e) {}
-        };
+        const maxVoices = Math.max(1, Math.floor(Number(hitCfg.maxVoices) || 6));
+        if (this._hitVoices >= maxVoices) return;
+        const buffer = this._getHitBuffer(type, hitCfg);
+        if (!buffer) return;
 
-        // 记录音频延迟
-        if (perfMonitor) {
+        const source = this.context.createBufferSource();
+        const gain = this._getGain();
+        const now = this.context.currentTime;
+        source.buffer = buffer;
+        gain.gain.cancelScheduledValues?.(now);
+        gain.gain.value = this._hitLevel(type, hitCfg);
+        source.connect(gain);
+        gain.connect(this.masterGain);
+        this._hitVoices++;
+        source.onended = () => {
+            this._hitVoices = Math.max(0, this._hitVoices - 1);
+            try { source.disconnect(); } catch (e) { /* ignore */ }
+            try { gain.disconnect(); } catch (e) { /* ignore */ }
+            this._releaseGain(gain);
+        };
+        source.start(now);
+
+        // 保留原有音频延迟采样（预渲染采样从 currentTime 立即起播）
+        if (typeof perfMonitor !== 'undefined' && perfMonitor && typeof perfMonitor.recordAudioLatency === 'function') {
             const actualTime = this.context.currentTime;
-            if (actualTime > now) {
-                perfMonitor.recordAudioLatency((actualTime - now) * 1000);
-            }
+            if (actualTime > now) perfMonitor.recordAudioLatency((actualTime - now) * 1000);
         }
     }
 
-    // ========== Gain 节点池 (Oscillator 不可复用) ==========
+    /** Hold 成功收尾：只播一次短促收束音，不参与谱面时钟。 */
+    playHoldEnd() {
+        this.playHitSound('holdEnd');
+    }
+
+    _hitLevel(type, cfg) {
+        const base = Number.isFinite(cfg.gain) ? cfg.gain : 0.24;
+        const scale = type === 'miss' ? cfg.missGainScale : (type === 'holdEnd' ? cfg.holdEndGainScale : 1);
+        return Math.max(0, Math.min(1, base * (Number.isFinite(scale) ? scale : (type === 'miss' ? 0.75 : 0.85))));
+    }
+
+    /** 按采样参数签名懒生成并缓存；兼容 getHitSoundConfig 每次创建新 fallback 对象。 */
+    _getHitBuffer(type, cfg) {
+        const configKey = JSON.stringify([
+            cfg.perfectFreq, cfg.greatFreq, cfg.holdEndFreq, cfg.missFreq,
+            cfg.duration, cfg.click
+        ]);
+        if (this._hitBufferConfigKey !== configKey) {
+            this._hitBuffers.clear();
+            this._hitBufferConfigKey = configKey;
+        }
+        const kind = ['perfect', 'great', 'miss', 'holdEnd'].includes(type) ? type : 'miss';
+        if (!this._hitBuffers.has(kind)) this._hitBuffers.set(kind, this._renderHitBuffer(kind, cfg));
+        return this._hitBuffers.get(kind);
+    }
+
+    _renderHitBuffer(type, cfg) {
+        if (typeof this.context.createBuffer !== 'function') return null;
+        const sampleRate = this.context.sampleRate || 48000;
+        const isMiss = type === 'miss';
+        const duration = Math.max(0.015, Math.min(0.12, Number(cfg.duration) || 0.045));
+        const length = Math.max(1, Math.round(sampleRate * duration));
+        const buffer = this.context.createBuffer(1, length, sampleRate);
+        const data = buffer.getChannelData(0);
+        const freq = Number(type === 'perfect' ? cfg.perfectFreq
+            : type === 'great' ? cfg.greatFreq
+            : type === 'holdEnd' ? cfg.holdEndFreq
+            : cfg.missFreq) || (isMiss ? 150 : 1600);
+        const click = Math.max(0, Math.min(1, Number.isFinite(cfg.click) ? cfg.click : 0.55));
+        const bodyDecay = isMiss ? 0.018 : 0.012;
+        const clickDecay = isMiss ? 0.004 : 0.0018;
+        let seed = 0x9e3779b9 ^ Math.round(freq);
+        let peak = 0;
+        for (let i = 0; i < length; i++) {
+            const t = i / sampleRate;
+            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+            const noise = seed / 2147483648 - 1;
+            const body = Math.sin(2 * Math.PI * freq * t) * Math.exp(-t / bodyDecay);
+            const overtone = Math.sin(2 * Math.PI * freq * 2.37 * t) * Math.exp(-t / (bodyDecay * 0.45)) * 0.35;
+            const transient = noise * Math.exp(-t / clickDecay) * click;
+            const fadeOut = Math.min(1, (length - i) / Math.max(1, sampleRate * 0.003));
+            const value = (body + overtone + transient) * fadeOut;
+            data[i] = value;
+            peak = Math.max(peak, Math.abs(value));
+        }
+        if (peak > 0) for (let i = 0; i < length; i++) data[i] /= peak;
+        return buffer;
+    }
+
+    // ========== Gain 节点池 ==========
     _gainPool = [];
 
     _getGain() {

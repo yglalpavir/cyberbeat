@@ -3418,3 +3418,128 @@ html.is-pointer-fine body.game-active:not(.paused) {
         max-width: min(88vw, 420px);
     }
 }
+
+/* ============================================================
+   歌曲组卡片 / 谱面切换 / 全局设置 / 校准 / 结算最佳
+   ============================================================ */
+.song-group-card { flex-direction: column; align-items: stretch; gap: 8px; }
+.card-chart-count, .card-level-range {
+    font: 700 0.62rem/1 ui-monospace, Consolas, monospace;
+    letter-spacing: 1px; padding: 3px 7px; border-radius: 4px;
+    border: 1px solid var(--border-subtle); color: var(--text-secondary);
+}
+.card-level-range { color: var(--warning); border-color: rgba(255, 212, 59, 0.35); }
+.group-chart-strip { display: flex; gap: 5px; overflow-x: auto; padding-left: 40px; scrollbar-width: none; }
+.group-chart-strip::-webkit-scrollbar { display: none; }
+.group-chart-chip {
+    flex: 0 0 auto; display: inline-flex; gap: 5px; align-items: center;
+    padding: 3px 8px; border-radius: 4px; font-size: 0.62rem;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-subtle);
+    color: var(--text-secondary); max-width: 180px;
+}
+.group-chart-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-chart-lv { font-family: ui-monospace, Consolas, monospace; color: var(--warning); font-weight: 700; }
+.group-chart-chip.active { border-color: var(--accent); color: var(--text-primary); background: rgba(77, 171, 247, 0.12); }
+
+.chart-difficulty-selector { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.chart-difficulty-btn {
+    min-height: 44px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding: 8px 12px; border-radius: var(--radius-sm); cursor: pointer; text-align: left;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-subtle);
+    color: var(--text-secondary); font: inherit; font-size: 0.75rem;
+}
+.chart-difficulty-btn .cd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-difficulty-btn .cd-lv { font: 700 0.68rem ui-monospace, Consolas, monospace; color: var(--warning); flex-shrink: 0; }
+.chart-difficulty-btn.active { border-color: var(--accent); color: var(--text-primary); background: rgba(77, 171, 247, 0.14); }
+.chart-difficulty-btn:disabled { opacity: 0.5; cursor: wait; }
+
+.settings-group.hidden, .settings-song-info.hidden, .settings-actions .btn.hidden,
+#settingsScreen[data-mode="global"] .audio-status { display: none !important; }
+
+.calibration-intro { font-size: 0.72rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px; }
+.calibration-status {
+    font: 600 0.75rem ui-monospace, Consolas, monospace; padding: 8px 10px; margin-bottom: 8px;
+    border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.04); color: var(--text-secondary);
+}
+.calibration-status[data-tone="ready"], .calibration-status[data-tone="applied"] { color: var(--success); }
+.calibration-status[data-tone="warn"] { color: var(--danger); }
+.calibration-pad {
+    width: 100%; min-height: 84px; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    gap: 4px; border-radius: var(--radius-md); border: 1px dashed var(--border-medium);
+    background: rgba(255, 255, 255, 0.03); color: var(--text-tertiary); cursor: pointer;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; margin-bottom: 8px;
+}
+.calibration-pad-main { font: 900 1.4rem ui-monospace, Consolas, monospace; letter-spacing: 4px; }
+.calibration-pad-sub { font-size: 0.68rem; }
+.calibration-pad.active { border-style: solid; border-color: var(--accent); color: var(--text-primary); }
+.calibration-pad.hit { animation: calPadHit 0.15s ease-out; }
+@keyframes calPadHit { from { background: rgba(77, 171, 247, 0.3); } to { background: rgba(255, 255, 255, 0.03); } }
+.calibration-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.calibration-actions .btn { flex: 1 1 0; min-height: 40px; }
+
+.result-best {
+    grid-column: 1 / -1;
+    display: flex; align-items: baseline; justify-content: center; gap: 10px; width: 100%;
+    padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);
+    font-family: ui-monospace, Consolas, monospace; animation: slideUp 0.5s ease 0.25s both;
+}
+.result-best:empty { display: none; }
+.result-best-tag { font-weight: 900; letter-spacing: 2px; font-size: 0.8rem; }
+.result-best-value { font-weight: 700; font-size: 0.95rem; }
+.result-best.is-new { border-color: rgba(255, 212, 59, 0.6); background: rgba(255, 212, 59, 0.1); color: var(--warning); }
+.result-best.is-best { color: var(--text-secondary); }
+.result-best.is-best .result-best-value { color: var(--accent); }
+.result-best.is-failed { color: var(--danger); opacity: 0.8; }
+@media (orientation: landscape) and (max-height: 520px) {
+    .result-best { padding: 4px 8px; gap: 7px; }
+    .result-best-tag { font-size: 0.66rem; }
+    .result-best-value { font-size: 0.78rem; }
+    .song-group-card .card-meta { display: flex; }
+    .group-chart-strip { padding-left: 0; }
+    .calibration-pad { min-height: 60px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .calibration-pad.hit, .result-best { animation: none; }
+}
+
+.song-chart-card {
+    display: flex; flex-direction: column; gap: 4px; padding: 10px 12px;
+    border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.035);
+}
+.song-chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.song-chart-name { font-size: 0.9rem; font-weight: 800; color: var(--text-primary); }
+.song-chart-level { font: 800 0.78rem ui-monospace, Consolas, monospace; color: var(--warning); }
+.song-chart-meta { font: 600 0.64rem/1.4 ui-monospace, Consolas, monospace; letter-spacing: 0.5px; color: var(--text-secondary); }
+
+@media (orientation: landscape) and (max-height: 520px) {
+    #settingsScreen[data-mode="global"] .settings-body { align-content: start; overflow-x: hidden; }
+    #settingsScreen[data-mode="song"] #chartDifficultyGroup { grid-column: span 2; }
+    #settingsScreen[data-mode="global"] #calibrationGroup {
+        order: -1;
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: auto auto auto;
+        align-items: center;
+        gap: 4px 12px;
+    }
+    #settingsScreen[data-mode="global"] #calibrationGroup .settings-label { grid-column: 1 / -1; }
+    #settingsScreen[data-mode="global"] #calibrationGroup .calibration-intro { display: none; }
+    #settingsScreen[data-mode="global"] #calibrationGroup .calibration-status {
+        grid-column: 1; grid-row: 2; margin: 0; padding: 6px 8px; font-size: 0.64rem;
+    }
+    #settingsScreen[data-mode="global"] #calibrationGroup .calibration-pad {
+        grid-column: 2; grid-row: 2; min-height: 40px; margin: 0; padding: 2px 8px;
+    }
+    #settingsScreen[data-mode="global"] #calibrationGroup .calibration-pad-main { font-size: 0.8rem; letter-spacing: 2px; }
+    #settingsScreen[data-mode="global"] #calibrationGroup .calibration-pad-sub { display: none; }
+    #settingsScreen[data-mode="global"] #calibrationGroup .calibration-actions {
+        grid-column: 1 / -1; grid-row: 3; flex-wrap: nowrap; gap: 6px;
+    }
+    #settingsScreen[data-mode="global"] #calibrationGroup .calibration-actions .btn {
+        flex: 1 1 0; min-height: 34px; padding: 5px 8px; font-size: 0.6rem; white-space: nowrap;
+    }
+    .song-chart-card { padding: 6px 10px; }
+    .song-chart-meta { font-size: 0.56rem; }
+}

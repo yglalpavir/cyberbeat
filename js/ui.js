@@ -11,6 +11,18 @@ class UIManager {
 
         this._resumeTask = null;
 
+        // 设置页模式：'song'（谱面/难度）| 'global'（延迟/流速/皮肤/音量）
+        this._settingsMode = 'song';
+        this._settingsOrigin = 'start';
+        this._switchingChart = false;
+        // 歌曲组内上次选择的谱面（组 key → songLibrary 下标）
+        const savedChartPicks = settingsStore.get('chartSelections') || {};
+        const savedMidiDifficulties = settingsStore.get('midiDifficulties') || {};
+        this._savedChartPicks = { ...savedChartPicks };
+        this._savedMidiDifficulties = { ...savedMidiDifficulties };
+        // 音频延迟校准运行时状态
+        this._calibration = null;
+
         // 排行榜返回来源
         this._lbOrigin = 'start';
 
@@ -94,11 +106,28 @@ class UIManager {
         this.leaderboardStartBtn = document.getElementById('leaderboardStartBtn');
 
         // 设置面板
+        this.settingsTitle      = document.getElementById('settingsTitle');
+        this.settingsSongInfo   = document.getElementById('settingsSongInfo');
         this.settingsSongTitle  = document.getElementById('settingsSongTitle');
         this.settingsSongArtist = document.getElementById('settingsSongArtist');
         this.settingsSongMeta   = document.getElementById('settingsSongMeta');
         this.difficultyGroup    = document.getElementById('difficultyGroup');
+        this.songChartSummary  = document.getElementById('songChartSummary');
+        this.songChartName     = document.getElementById('songChartName');
+        this.songChartLevel    = document.getElementById('songChartLevel');
+        this.songChartMeta     = document.getElementById('songChartMeta');
+        this.chartDifficultyGroup = document.getElementById('chartDifficultyGroup');
+        this.chartDifficultySelector = document.getElementById('chartDifficultySelector');
+        this.settingsGlobalBtn  = document.getElementById('settingsGlobalBtn');
         this.speedValue         = document.getElementById('speedValue');
+
+        // 音频延迟校准
+        this.calibrationStatus  = document.getElementById('calibrationStatus');
+        this.calibrationPad     = document.getElementById('calibrationPad');
+        this.calibrationPadSub  = document.getElementById('calibrationPadSub');
+        this.calibrationStart   = document.getElementById('calibrationStart');
+        this.calibrationApply   = document.getElementById('calibrationApply');
+        this.calibrationReset   = document.getElementById('calibrationReset');
 
         // 音量
         this.volumeSlider = document.getElementById('volumeSlider');
@@ -116,6 +145,10 @@ class UIManager {
         this.finalPerfect   = document.getElementById('finalPerfect');
         this.finalGreat     = document.getElementById('finalGreat');
         this.finalMiss      = document.getElementById('finalMiss');
+        this.resultBest     = document.getElementById('resultBest');
+        // 本局启动时锁定的 chart identity，避免结算前选歌/UI 状态变化混淆对比对象
+        this._runChartId = null;
+        this._runSongName = null;
 
         // 结果面板 - 新按钮
         this.retryBtn       = document.getElementById('retryBtn');
@@ -162,7 +195,11 @@ class UIManager {
     setupEventListeners() {
         // 开始按钮 (统一入口)
         this.startBtn.addEventListener('click', () => this.handleStartOrConfig());
-        this.settingsBtn.addEventListener('click', () => this.handleStartOrConfig());
+        // 全局设置无需选曲即可进入；谱面/难度在歌曲设置里
+        this.settingsBtn.addEventListener('click', () => this.showGlobalSettings());
+        if (this.settingsGlobalBtn) {
+            this.settingsGlobalBtn.addEventListener('click', () => this.showGlobalSettings());
+        }
 
         // 开始画面的排行榜按钮
         if (this.leaderboardStartBtn) {
@@ -172,6 +209,44 @@ class UIManager {
         // 设置面板内按钮
         this.settingsStartBtn.addEventListener('click', () => this.startGame());
         this.settingsBackBtn.addEventListener('click', () => this.hideSettings());
+
+        // 延迟校准
+        if (this.calibrationStart) {
+            this.calibrationStart.addEventListener('click', () => {
+                if (this._calibration && this._calibration.active) {
+                    this._stopCalibration();
+                } else {
+                    this._startCalibration().catch((err) => {
+                        console.warn('Calibration failed:', err);
+                        this._stopCalibration();
+                        this._setCalibrationStatus('校准启动失败 · 请重试', 'warn');
+                    });
+                }
+            });
+        }
+        if (this.calibrationPad) {
+            // pointerdown 比 click 更贴近实际按下时间
+            this.calibrationPad.addEventListener('pointerdown', (e) => {
+                if (!e.isPrimary || e.button !== 0) return;
+                e.preventDefault();
+                this._recordCalibrationTap();
+            });
+            this.calibrationPad.addEventListener('keydown', (e) => {
+                if (e.key !== ' ' && e.key !== 'Enter') return;
+                e.preventDefault();
+                if (!e.repeat) this._recordCalibrationTap();
+            });
+        }
+        if (this.calibrationApply) {
+            this.calibrationApply.addEventListener('click', () => this._applyCalibrationSuggestion());
+        }
+        if (this.calibrationReset) {
+            this.calibrationReset.addEventListener('click', () => {
+                this._stopCalibration();
+                this.setAudioOffset(0);
+                this._setCalibrationStatus('已重置为 0ms · 可重新测量', 'reset');
+            });
+        }
 
         // 结果面板
         this.homeBtn.addEventListener('click', () => this.goToHome());
@@ -362,6 +437,9 @@ class UIManager {
     // ========== 页面可见性 / 唤醒锁 ==========
     _setupVisibilityHandling() {
         document.addEventListener('visibilitychange', () => {
+            if (document.hidden && this._calibration?.active) {
+                this._stopCalibration();
+            }
             if (gameState.screen !== 'game') return;
             if (document.hidden) {
                 if (gameState.resumeCountdownUntil > 0) {
@@ -505,6 +583,11 @@ class UIManager {
         this._libraryRetrying = false;
     }
 
+    _canImportSong() {
+        return gameState.screen === 'start' && !this.startScreen.classList.contains('hidden') &&
+            !this._openingSettings && !this._startingGame && !this._importBusy;
+    }
+
     /** 拖拽导入：把 .mid / .osu / .osz 拖进页面即可导入（仅选曲界面） */
     _setupDragAndDrop() {
         const hint = document.getElementById('dropHint');
@@ -515,7 +598,7 @@ class UIManager {
         window.addEventListener('dragenter', (e) => {
             if (!isFileDrag(e)) return;
             e.preventDefault();
-            if (gameState.screen !== 'start') return;
+            if (!this._canImportSong()) return;
             depth++;
             show(true);
         });
@@ -534,8 +617,8 @@ class UIManager {
             e.preventDefault();
             depth = 0;
             show(false);
-            if (gameState.screen !== 'start') {
-                this._notice('请先回到选曲界面再拖入谱面', 'warn');
+            if (!this._canImportSong()) {
+                this._notice('请先回到选曲界面并等待加载结束，再拖入谱面', 'warn');
                 return;
             }
             const file = e.dataTransfer.files && e.dataTransfer.files[0];
@@ -582,6 +665,36 @@ class UIManager {
      */
     _getChartSongs() {
         return songLibrary.filter(s => this._isChartSong(s));
+    }
+
+    /** 谱面类歌曲的合并键：同曲名 + 同艺术家视为同一首歌的不同谱面 */
+    _chartGroupKey(song) {
+        return `${song?.title || ''}\u0000${song?.artist || ''}`;
+    }
+
+    /**
+     * 把 SONGS 谱面按歌曲合并为谱面组，保留 menu.json 的顺序。
+     * @param {Array} [songs] 默认全部谱面歌曲
+     * @returns {Array<{key:string,title:string,artist:string,charts:Array<{song:object,index:number}>}>}
+     */
+    _getChartGroups(songs = this._getChartSongs()) {
+        const map = new Map();
+        songs.forEach((song) => {
+            const key = this._chartGroupKey(song);
+            let group = map.get(key);
+            if (!group) {
+                group = { key, title: song.title || 'Unknown', artist: song.artist || '', charts: [] };
+                map.set(key, group);
+            }
+            group.charts.push({ song, index: songLibrary.indexOf(song) });
+        });
+        return Array.from(map.values());
+    }
+
+    /** 找到某首歌所属的谱面组 */
+    _songGroupOf(song) {
+        if (!song) return null;
+        return this._getChartGroups().find(g => g.key === this._chartGroupKey(song)) || null;
     }
 
     renderSongList() {
@@ -643,10 +756,9 @@ class UIManager {
             if (this.songEmptySongs) this.songEmptySongs.style.display = 'flex';
         } else {
             if (this.songEmptySongs) this.songEmptySongs.style.display = 'none';
-            chartSongs.forEach((song) => {
-                const realIndex = songLibrary.indexOf(song);
-                const card = this.createSongCard(song, realIndex);
-                this.songCardsSongs.appendChild(card);
+            // 同一首歌的不同难度谱面合并为一张卡片，谱面在歌曲设置里切换
+            this._getChartGroups(chartSongs).forEach((group) => {
+                this.songCardsSongs.appendChild(this.createSongGroupCard(group));
             });
             // 导入的 .osu / .osz 谱面：显示为合成卡片，避免切标签丢失选择
             if (hasOsuImport) {
@@ -710,16 +822,22 @@ class UIManager {
      * 更新标签页曲目计数
      */
     _updateTabCount() {
-        const midiSongs = this._getMidiSongs();
-        const chartSongs = this._getChartSongs();
-        const count = this.activeTab === 'midi' ? midiSongs.length : chartSongs.length;
-        this.songCount.textContent = `${count} TRACKS`;
+        if (this.activeTab === 'midi') {
+            this.songCount.textContent = `${this._getMidiSongs().length} TRACKS`;
+        } else {
+            const groups = this._getChartGroups();
+            const charts = groups.reduce((sum, g) => sum + g.charts.length, 0);
+            this.songCount.textContent = `${groups.length} SONGS / ${charts} CHARTS`;
+        }
     }
 
     createSongCard(song, index) {
         const card = document.createElement('div');
         card.className = 'song-card';
         card.dataset.songIndex = index;
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.setAttribute('aria-pressed', 'false');
 
         // 难度徽章（右侧显示；MIDI 多难度时为一个容器包裹多个徽章）
         const levelBadgeHTML = this.buildLevelBadge(song);
@@ -740,8 +858,92 @@ class UIManager {
             </div>
         `;
 
-        card.addEventListener('click', () => this.selectLibrarySong(song, index));
+        card.addEventListener('click', () => this.selectLibrarySong(song));
+        card.addEventListener('keydown', e => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            if (!e.repeat) card.click();
+        });
         return card;
+    }
+
+    /**
+     * SONGS 标签页的歌曲组卡片。
+     * 卡片展示该曲所有谱面（难度名 + 等级），真正的谱面切换在歌曲设置页完成。
+     */
+    createSongGroupCard(group) {
+        const charts = group.charts;
+        const primary = charts[0];
+        const card = document.createElement('div');
+        card.className = 'song-card song-group-card';
+        card.dataset.songGroup = group.key;
+        card.dataset.songIndex = primary.index;
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.setAttribute('aria-pressed', 'false');
+        card.setAttribute('aria-label', `${group.title}，${charts.length} 个谱面`);
+
+        const levels = charts
+            .map(c => parseInt(c.song.level))
+            .filter(n => Number.isFinite(n));
+        const levelText = levels.length
+            ? (Math.min(...levels) === Math.max(...levels)
+                ? `LV.${levels[0]}`
+                : `LV.${Math.min(...levels)}–${Math.max(...levels)}`)
+            : '';
+
+        const chips = charts.map(({ song }) => `
+            <span class="group-chart-chip" data-chart-id="${this.escapeHTML(song.id || '')}">
+                <span class="group-chart-name">${this.escapeHTML(song.difficultyName || 'CHART')}</span>
+                ${Number.isFinite(parseInt(song.level)) ? `<span class="group-chart-lv">${parseInt(song.level)}</span>` : ''}
+            </span>`).join('');
+
+        card.innerHTML = `
+            <div class="card-body">
+                <div class="card-icon">♫</div>
+                <div class="card-info">
+                    <span class="card-title">${this.escapeHTML(group.title)}</span>
+                    <span class="card-sub">${this.escapeHTML(group.artist || 'Unknown Artist')}</span>
+                </div>
+                <div class="card-meta">
+                    ${charts.length > 1 ? `<span class="card-chart-count">${charts.length} CHARTS</span>` : ''}
+                    ${levelText ? `<span class="card-level-range">${levelText}</span>` : ''}
+                </div>
+                <div class="card-arrow">→</div>
+            </div>
+            ${charts.length > 1 ? `<div class="group-chart-strip" aria-hidden="true">${chips}</div>` : ''}
+        `;
+
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.group-chart-chip')) return;
+            this._selectGroupChart(group);
+        });
+        card.addEventListener('keydown', e => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            if (!e.repeat) card.click();
+        });
+        return card;
+    }
+
+    /** 选中歌曲组内的谱面：优先组内记忆，其次当前选中，最后第一张 */
+    _selectGroupChart(group) {
+        const rememberedId = this._savedChartPicks[group.key];
+        const remembered = group.charts.find(c => c.song.id === rememberedId);
+        const current = group.charts.find(c => c.song === selectedLibrarySong);
+        const member = remembered || current || group.charts[0];
+        if (!member) return;
+        this.selectLibrarySong(member.song);
+    }
+
+    /** 组卡片在触屏双击时使用的谱面下标（组内记忆优先） */
+    _groupChartIndex(groupKey) {
+        const group = this._getChartGroups().find(g => g.key === groupKey);
+        if (!group) return -1;
+        const rememberedId = this._savedChartPicks[groupKey];
+        const remembered = group.charts.find(c => c.song.id === rememberedId);
+        const current = group.charts.find(c => c.song === selectedLibrarySong);
+        return (remembered || current || group.charts[0]).index;
     }
 
     // ========== 移动端选曲增强 ==========
@@ -772,7 +974,8 @@ class UIManager {
             if (dx > 10 || dy > 10) touchMoved = true;
         }, { passive: true });
         listWrapper.addEventListener('click', (e) => {
-            if (touchMoved) {
+            // detail===0 是键盘（Enter/Space）合成的点击，不受滑动手势影响
+            if (touchMoved && e.detail > 0) {
                 e.stopPropagation();
                 e.preventDefault();
                 touchMoved = false;
@@ -783,8 +986,11 @@ class UIManager {
         listWrapper.addEventListener('click', (e) => {
             const card = e.target.closest('.song-card');
             if (!card || card.classList.contains('import-card')) return;   // 导入卡片不参与双击
-            const idx = card.dataset.songIndex;
-            if (idx === undefined) return;
+            if (e.detail === 0) return;   // 键盘选择不触发“双击进设置”
+            const idx = card.dataset.songGroup
+                ? this._groupChartIndex(card.dataset.songGroup)
+                : card.dataset.songIndex;
+            if (idx === undefined || idx < 0) return;
 
             const now = performance.now();
             const isDoubleTap = this._lastCardTapIndex === idx && (now - this._lastCardTapAt) <= 400;
@@ -796,7 +1002,7 @@ class UIManager {
                 this._stopPreview();   // 双击进设置前停止试听
                 // 已选中则直接进入设置；未选中先选中再进入
                 if (selectedSongSource !== 'library' || selectedLibrarySong !== songLibrary[parseInt(idx)]) {
-                    this.selectLibrarySong(songLibrary[parseInt(idx)], parseInt(idx));
+                    this.selectLibrarySong(songLibrary[parseInt(idx)]);
                 }
                 this.handleStartOrConfig();
             }
@@ -808,8 +1014,10 @@ class UIManager {
         listWrapper.addEventListener('touchstart', (e) => {
             const card = e.target.closest('.song-card');
             if (!card || card.classList.contains('import-card')) return;
-            const idx = card.dataset.songIndex;
-            if (idx === undefined) return;
+            const idx = card.dataset.songGroup
+                ? this._groupChartIndex(card.dataset.songGroup)
+                : card.dataset.songIndex;
+            if (idx === undefined || idx < 0) return;
             const song = songLibrary[parseInt(idx)];
             if (!song || !this._isChartSong(song)) return;   // MIDI 无独立音频文件
 
@@ -929,7 +1137,8 @@ class UIManager {
     }
 
     // ========== 选曲逻辑 ==========
-    selectLibrarySong(song, index) {
+    selectLibrarySong(song) {
+        if (this._openingSettings || this._startingGame) return;
         // 切歌时停止试听
         this._stopPreview();
         selectedSongSource = 'library';
@@ -941,6 +1150,20 @@ class UIManager {
         importedOsuFileName = null;
         importedMcFileName = null;
         selectedSongDisplayName = song.title;
+        // 记住歌曲组内选择的谱面，回到选歌页时沿用
+        if (this._isChartSong(song)) {
+            this._savedChartPicks[this._chartGroupKey(song)] = song.id;
+            settingsStore.set('chartSelections', this._savedChartPicks);
+        } else if (Array.isArray(song.difficulties) && song.difficulties.length) {
+            // MIDI 难度属于歌曲设置：按曲目 ID 记忆，旧存档的 global difficulty 仅作首次回退
+            const rememberedDifficulty = this._savedMidiDifficulties[song.id];
+            const allowed = song.difficulties.map(d => typeof d === 'string' ? d : d?.key).filter(Boolean);
+            const legacyDefault = settingsStore.get('difficulty');
+            const next = allowed.includes(rememberedDifficulty)
+                ? rememberedDifficulty
+                : (allowed.includes(legacyDefault) ? legacyDefault : allowed[0]);
+            if (next) this.setDifficulty(next);
+        }
 
         // 切歌：清掉上一首的待播音频引用与预加载状态，
         // 防止尚未完成的旧预加载把旧伴奏写进新歌的播放
@@ -968,10 +1191,11 @@ class UIManager {
      * @param {File} file
      */
     async _loadMidiFile(file) {
-        this._showImportToast(`解析 ${file.name}`, { meta: this._formatBytes(file.size) });
-        await this._yieldToUI();
-
+        if (!this._canImportSong()) return;
+        this._importBusy = true;
         try {
+            this._showImportToast(`解析 ${file.name}`, { meta: this._formatBytes(file.size) });
+            await this._yieldToUI();
             const buffer = await file.arrayBuffer();
             const parser = new MidiParser(buffer);
             loadedMidiData = parser.parse();
@@ -989,6 +1213,8 @@ class UIManager {
             audioEngine.stopAudio();
             // 根据导入的 MIDI 文件名生成 title（去掉扩展名）
             selectedSongDisplayName = file.name.replace(/\.midi?$/i, '');
+            const key = this._localChartKey(loadedMidiData.events, 'midi');
+            this.setDifficulty(this._savedMidiDifficulties[key] || settingsStore.get('difficulty'));
 
             this.updateSelectionDisplay();
             this.updateAllHighlights();
@@ -1001,6 +1227,7 @@ class UIManager {
             this._notice('MIDI 解析失败，请确认是标准 MIDI 文件', 'error', 4000);
             this.clearSelection();
         } finally {
+            this._importBusy = false;
             this._hideImportToast();
         }
     }
@@ -1023,8 +1250,7 @@ class UIManager {
      * @param {File} file
      */
     async _importOsuOrOsz(file) {
-        // 防重复：上一次导入尚未完成时忽略本次
-        if (this._importBusy) return;
+        if (!this._canImportSong()) return;
         this._importBusy = true;
 
         const ext = file.name.split('.').pop().toLowerCase();
@@ -1135,7 +1361,7 @@ class UIManager {
         if (opts.meta !== undefined && metaEl) metaEl.textContent = opts.meta;
         if (!track || !fill) return;
         const hasProgress = typeof opts.progress === 'number' && Number.isFinite(opts.progress);
-        const indeterminate = opts.indeterminate !== undefined ? opts.indeterminate : !hasProgress;
+        const indeterminate = opts.indeterminate ?? (state === 'loading' && !hasProgress);
         track.classList.toggle('indeterminate', indeterminate);
         if (hasProgress) {
             fill.style.width = Math.max(0, Math.min(100, opts.progress * 100)).toFixed(1) + '%';
@@ -1250,7 +1476,7 @@ class UIManager {
         this._oszAssignAudio(candidates);
 
         if (candidates.length === 1) {
-            this.applyOszCandidate(0);
+            this._applyOszCandidate(0);
         } else {
             this.showOszPicker(candidates);
         }
@@ -1324,6 +1550,10 @@ class UIManager {
 
     /** 应用选择器中的某个候选谱面 */
     applyOszCandidate(index) {
+        if (this._canImportSong()) this._applyOszCandidate(index);
+    }
+
+    _applyOszCandidate(index) {
         const c = (this._oszCandidates || [])[index];
         if (!c) return;
         const zip = this._oszZip;
@@ -1558,11 +1788,14 @@ class UIManager {
     }
 
     updateSelectionDisplay() {
+        const selection = this.selectedSongName.closest('.current-selection');
         const importName = importedOsuFileName || importedMcFileName || importedMidiFileName;
+        const previousName = this.selectedSongName.textContent;
+        const previousSource = this.selectedSongSourceEl.textContent;
         if (selectedSongSource === 'library' && selectedLibrarySong) {
             this.selectedSongName.textContent = selectedLibrarySong.title;
             this.selectedSongName.style.color = 'var(--accent)';
-            this.selectedSongSourceEl.textContent = 'LIBRARY';
+            this.selectedSongSourceEl.textContent = ['LIBRARY', selectedLibrarySong.difficultyName].filter(Boolean).join(' / ');
             this.selectedSongSourceEl.style.color = '';
         } else if (selectedSongSource === 'import' && importName) {
             this.selectedSongName.textContent = importName;
@@ -1574,6 +1807,10 @@ class UIManager {
             this.selectedSongName.style.color = '';
             this.selectedSongSourceEl.textContent = '';
         }
+        selection.dataset.source = selectedSongSource || '';
+        if (previousName !== this.selectedSongName.textContent || previousSource !== this.selectedSongSourceEl.textContent) {
+            this._enterAnim(selection);
+        }
     }
 
     updateAllHighlights() {
@@ -1583,25 +1820,39 @@ class UIManager {
         // 曲库卡片（两个标签页都更新）
         const allSongCards = document.querySelectorAll('.song-cards .song-card');
         allSongCards.forEach(card => {
-            const idx = parseInt(card.dataset.songIndex);
-            const isSelected = selectedSongSource === 'library' &&
-                selectedLibrarySong &&
-                songLibrary[idx] === selectedLibrarySong;
+            let isSelected = false;
+            if (card.dataset.songGroup) {
+                const group = this._getChartGroups().find(g => g.key === card.dataset.songGroup);
+                isSelected = !!(selectedSongSource === 'library' && selectedLibrarySong && group &&
+                    group.charts.some(c => c.song === selectedLibrarySong));
+                // 组内高亮当前谱面
+                card.querySelectorAll('.group-chart-chip').forEach(chip => {
+                    chip.classList.toggle('active', isSelected && !!selectedLibrarySong &&
+                        chip.dataset.chartId === String(selectedLibrarySong.id ?? ''));
+                });
+            } else {
+                const idx = parseInt(card.dataset.songIndex);
+                isSelected = !!(selectedSongSource === 'library' &&
+                    selectedLibrarySong &&
+                    songLibrary[idx] === selectedLibrarySong);
+            }
             card.classList.toggle('selected', isSelected);
+            if (card.hasAttribute('aria-pressed')) card.setAttribute('aria-pressed', String(!!isSelected));
         });
     }
 
     updateStartButtons() {
         const hasSelection = selectedSongSource !== null;
         this.startBtn.disabled = !hasSelection;
-        this.settingsBtn.disabled = !hasSelection;
+        // 全局设置与选曲无关，始终可用
+        this.settingsBtn.disabled = false;
     }
 
     // ========== 启动流程 ==========
     async handleStartOrConfig() {
-        if (!selectedSongSource) return;
+        if (!selectedSongSource || this._importBusy) return;
         // 防连点：载入谱面是异步的，快速双击会重复请求并弹两次设置页
-        if (this._openingSettings) return;
+        if (this._openingSettings || this._startingGame) return;
         this._openingSettings = true;
         this._stopPreview();   // 离开选曲页前停止歌曲试听
 
@@ -1943,13 +2194,81 @@ class UIManager {
         }
     }
 
-    showSettings() {
-        if (!selectedSongSource) return;
+    /**
+     * 打开设置页。
+     * - 'song'：歌曲设置（谱面/难度），需要已选曲
+     * - 'global'：全局设置（延迟/校准/流速/皮肤/音量），无选曲也可打开
+     * @param {'song'|'global'} mode
+     * @param {'start'|'song'} [origin] 全局设置返回来源
+     */
+    showSettings(mode = 'song', origin) {
+        if (mode !== 'global' && !selectedSongSource) return;
 
-        // 每次进入设置页先收起上一首的伴奏状态，等本曲预载回调再显示
-        this._setAudioStatus('hidden');
+        if (mode === 'song') this._stopCalibration();
+        this._settingsMode = mode;
+        if (mode === 'global') {
+            this._settingsOrigin = origin || 'start';
+        }
 
-        // 更新设置面板的歌曲信息
+        // 全局设置暂时隐藏进度；回到同一谱面时保留原状态。
+        if (!this._pendingAudioKey) this._setAudioStatus('hidden');
+
+        if (mode === 'global') {
+            this.settingsTitle.textContent = 'GLOBAL SETTINGS';
+            this.settingsSongInfo.classList.add('hidden');
+            this._calSuggestion = null;
+            if (this.calibrationApply) this.calibrationApply.disabled = true;
+            this._setCalibrationStatus(
+                `当前偏移 ${audioOffsetMs > 0 ? '+' : ''}${audioOffsetMs}ms · 可测量更精确的延迟`,
+                'idle'
+            );
+        } else {
+            this.settingsTitle.textContent = 'SONG SETTINGS';
+            this.settingsSongInfo.classList.remove('hidden');
+            this._renderSongSettingsInfo();
+            this._renderChartDifficultySelector();
+        }
+
+        this._applySettingsMode();
+        this.startScreen.classList.add('hidden');
+        this.settingsScreen.classList.remove('hidden');
+        this._enterAnim('.settings-card');
+    }
+
+    /** 全局设置入口（选歌页 / 歌曲设置内均可进入） */
+    showGlobalSettings() {
+        if (this._openingSettings || this._startingGame || this._switchingChart || this._importBusy) return;
+        this._stopPreview();
+        const origin = this._settingsMode === 'song' &&
+            !this.settingsScreen.classList.contains('hidden') ? 'song' : 'start';
+        this.showSettings('global', origin);
+    }
+
+    /** 按当前模式显示/隐藏设置分组与动作按钮 */
+    _applySettingsMode() {
+        const isGlobal = this._settingsMode === 'global';
+        document.querySelectorAll('.global-setting-group').forEach(el => {
+            el.classList.toggle('hidden', !isGlobal);
+        });
+        const group = this._isChartSong(selectedLibrarySong) ? this._songGroupOf(selectedLibrarySong) : null;
+        const hasChartChoices = !!(group && group.charts.length > 1);
+        document.querySelectorAll('.song-setting-group').forEach(el => el.classList.toggle('hidden', isGlobal));
+        // 谱面切换器只在“歌曲设置 + 同曲多谱面”时出现；
+        // 返回歌曲设置时必须恢复，不能把整组永久隐藏。
+        this.chartDifficultyGroup.classList.toggle('hidden', isGlobal || !hasChartChoices);
+        this.difficultyGroup.classList.toggle('hidden', isGlobal || !!getLoadedChartData());
+        this.songChartSummary.classList.toggle('hidden', isGlobal);
+        this.settingsScreen.dataset.mode = this._settingsMode;
+        this.settingsStartBtn.classList.toggle('hidden', isGlobal);
+        this.settingsStartBtn.disabled = this._switchingChart || (!loadedMidiData && !getLoadedChartData());
+        this.settingsGlobalBtn?.classList.toggle('hidden', isGlobal);
+        this.settingsBackBtn.textContent = isGlobal && this._settingsOrigin === 'song'
+            ? '← SONG SETTINGS'
+            : 'BACK';
+    }
+
+    /** 更新歌曲设置页的曲目元数据 */
+    _renderSongSettingsInfo() {
         const importName = importedOsuFileName || importedMidiFileName;
         if (selectedSongSource === 'library' && selectedLibrarySong) {
             this.settingsSongTitle.textContent = selectedLibrarySong.title;
@@ -1959,43 +2278,113 @@ class UIManager {
             this.settingsSongArtist.textContent = 'Custom Import';
         }
 
-        // 显示 BPM 和时长
         let bpmText = '';
         let durText = '';
-
         const chartData = getLoadedChartData();
+        let level;
+        if (!chartData) this.filterDifficultyButtons();
         if (chartData && chartData.meta) {
-            // 谱面（.mc / .osu）：使用谱面元数据 + 自动计算难度
             const diff = new DifficultyCalculator(chartData.notes).calculate();
+            level = diff.level;
             bpmText = `BPM ${chartData.meta.bpm}  •  ★ ${diff.star.toFixed(2)}  •  Lv.${diff.level}`;
             durText = formatDuration(chartData.meta.duration);
-            if (chartData.meta.version) {
-                bpmText += `  •  ${chartData.meta.version}`;
-            }
+            if (chartData.meta.version) bpmText += `  •  ${chartData.meta.version}`;
+            const creator = selectedLibrarySong?.creator || chartData.meta.creator;
+            if (creator) bpmText += `  •  Chart by ${creator}`;
         } else if (loadedMidiData) {
-            // MIDI：使用 MIDI 计算的 BPM 和时长
             const bpm = computeAverageBpm(loadedMidiData);
             const dur = formatDuration(loadedMidiData.duration);
             bpmText = `BPM ${bpm}`;
             durText = dur;
         }
-
         this.settingsSongMeta.textContent = [bpmText, durText].filter(Boolean).join('  •  ');
 
-        // 谱面（.mc / .osu，含导入的 osu）不显示难度选择（谱面固定，难度无影响）
+        // 谱面摘要：单谱面歌曲也有一块明确的“当前谱面”信息
         const isChart = !!getLoadedChartData();
-        if (this.difficultyGroup) {
-            this.difficultyGroup.style.display = isChart ? 'none' : '';
+        const group = this._isChartSong(selectedLibrarySong) ? this._songGroupOf(selectedLibrarySong) : null;
+        if (isChart) {
+            this.songChartName.textContent = selectedLibrarySong?.difficultyName || chartData.meta?.version || 'CHART';
+            this.songChartLevel.textContent = Number.isFinite(level) ? `LV.${level}` : '';
+        } else {
+            this._renderMidiDifficultySummary();
+        }
+        const noteCount = chartData?.notes?.length ?? 0;
+        this.songChartMeta.textContent = [
+            noteCount ? `${noteCount} NOTES` : '',
+            isChart ? 'FIXED CHART' : 'GENERATED CHART',
+            group && group.charts.length > 1 ? `${group.charts.length} CHARTS IN THIS SONG` : ''
+        ].filter(Boolean).join('  ·  ');
+
+        // 谱面（.mc / .osu）固定，不显示生成难度；MIDI 仍可选难度
+        this.difficultyGroup.classList.toggle('hidden', isChart);
+    }
+
+    _renderMidiDifficultySummary() {
+        const metadata = selectedLibrarySong?.difficulties?.find(d => d?.key === selectedDifficulty);
+        const level = parseInt(metadata?.level);
+        this.songChartName.textContent = metadata?.name || selectedDifficulty.toUpperCase();
+        this.songChartLevel.textContent = Number.isFinite(level) ? `LV.${level}` : '';
+    }
+
+    /** 歌曲设置页：同曲多谱面时的谱面切换器 */
+    _renderChartDifficultySelector() {
+        if (!this.chartDifficultyGroup || !this.chartDifficultySelector) return;
+        const group = this._isChartSong(selectedLibrarySong) ? this._songGroupOf(selectedLibrarySong) : null;
+        const charts = group ? group.charts : [];
+        const show = this._settingsMode === 'song' && charts.length > 1;
+        this.chartDifficultyGroup.classList.toggle('hidden', !show);
+        if (!show) {
+            this.chartDifficultySelector.innerHTML = '';
+            return;
         }
 
-        // 根据歌曲的 difficulties 字段过滤难度按钮
-        if (!isChart) {
-            this.filterDifficultyButtons();
-        }
+        this.chartDifficultySelector.innerHTML = charts.map(({ song }) => {
+            const active = song === selectedLibrarySong;
+            const lv = parseInt(song.level);
+            return `
+                <button class="chart-difficulty-btn${active ? ' active' : ''}" type="button"
+                    data-song-index="${songLibrary.indexOf(song)}" aria-pressed="${active}">
+                    <span class="cd-name">${this.escapeHTML(song.difficultyName || 'CHART')}</span>
+                    ${Number.isFinite(lv) ? `<span class="cd-lv">LV.${lv}</span>` : ''}
+                </button>`;
+        }).join('');
 
-        this.startScreen.classList.add('hidden');
-        this.settingsScreen.classList.remove('hidden');
-        this._enterAnim('.settings-card');
+        this.chartDifficultySelector.querySelectorAll('.chart-difficulty-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (this._switchingChart) return;
+                const index = parseInt(btn.dataset.songIndex);
+                const target = songLibrary[index];
+                if (!target || target === selectedLibrarySong) return;
+                this._selectChartVariant(target);
+            });
+        });
+    }
+
+    /** 切换到同曲的另一张谱面，并重新载入设置页元数据/伴奏 */
+    async _selectChartVariant(song) {
+        if (this._switchingChart || this._startingGame || this._openingSettings) return;
+        this._switchingChart = true;
+        this.settingsStartBtn.disabled = true;
+        this.chartDifficultySelector.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        const previous = selectedLibrarySong;
+        const previousMc = loadedMcData;
+        const previousOsu = loadedOsuData;
+        try {
+            this.selectLibrarySong(song);
+            await this.handleStartOrConfig();
+            if (!getLoadedChartData() && previous && (previousMc || previousOsu)) {
+                // 载入失败时继续使用原谱面，避免界面与实际选曲不一致。
+                this.selectLibrarySong(previous);
+                loadedMcData = previousMc;
+                loadedOsuData = previousOsu;
+                this.showSettings('song');
+                this._preloadSongAudio(previous);
+            }
+        } finally {
+            this._switchingChart = false;
+            this.settingsStartBtn.disabled = !loadedMidiData && !getLoadedChartData();
+            this.chartDifficultySelector.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        }
     }
 
     /**
@@ -2046,6 +2435,13 @@ class UIManager {
     }
 
     hideSettings() {
+        if (this._startingGame || this._switchingChart) return;
+        this._stopCalibration();
+        // 从歌曲设置进入全局设置时，BACK 返回歌曲设置
+        if (this._settingsMode === 'global' && this._settingsOrigin === 'song' && selectedSongSource) {
+            this.showSettings('song');
+            return;
+        }
         this.settingsScreen.classList.add('hidden');
         this.startScreen.classList.remove('hidden');
         this._enterAnim('.start-layout');
@@ -2059,7 +2455,7 @@ class UIManager {
             return;
         }
         // 防重复点击：startGame 含异步等待，快速双击会启动两局
-        if (this._startingGame) return;
+        if (this._startingGame || this._switchingChart || this._openingSettings || this._importBusy) return;
         this._startingGame = true;
         try {
             await this._startGameInner();
@@ -2109,6 +2505,12 @@ class UIManager {
             }
             showLoading(false);
         }
+
+        // 锁定本局歌曲/谱面身份，供结算历史最佳比较使用。
+        // 放在音频等待之后，确保身份对应真正开始游玩的谱面。
+        this._runChartId = this._recordChartId();
+        this._runSongName = selectedSongDisplayName || 'Unknown';
+        this._runDifficulty = selectedLibrarySong?.difficultyName || chartData?.meta?.version || selectedDifficulty;
 
         // 停止一切残留播放（结算音乐/上一局音乐）。
         audioEngine.stopMusic();
@@ -2280,21 +2682,10 @@ class UIManager {
 
         // 更新排名显示
         rankDisplay.textContent = rank;
-        rankDisplay.className = 'rank';
-        
-        // 根据等级设置特殊样式
-        resultCard.classList.remove('result-failed', 'result-phi', 'result-v', 'result-s', 'result-a');
-        if (isGameFailed) {
-            resultCard.classList.add('result-failed');
-        } else if (rank === 'φ') {
-            resultCard.classList.add('result-phi');
-        } else if (rank === 'V') {
-            resultCard.classList.add('result-v');
-        } else if (rank === 'S') {
-            resultCard.classList.add('result-s');
-        } else if (rank === 'A') {
-            resultCard.classList.add('result-a');
-        }
+        const rankClass = this._getRecordRankClass(rank);
+        rankDisplay.className = `rank-stamp ${rankClass}`;
+        resultCard.dataset.rank = rankClass;
+        document.getElementById('resultTrack').textContent = [this._runSongName, this._runDifficulty].filter(Boolean).join(' / ');
 
         // 根据状态更新 UI 样式
         if (isGameFailed) {
@@ -2309,16 +2700,16 @@ class UIManager {
 
         rankLabel.textContent = rankResult.rankLabel;
 
+        // 结算最佳成绩提示：在写入本局记录前读取同谱面历史最佳
+        const previousBest = this._getPreviousBestScore(this._runChartId, this._runSongName);
+        this._renderResultBest(previousBest, scoreResult.finalScore, isGameFailed);
+
         this.finalScore.textContent    = scoreResult.finalScore.toLocaleString();
         this.finalCombo.textContent    = gameState.maxCombo;
         this.finalAccuracy.textContent = accuracy.toFixed(2) + '%';
         this.finalPerfect.textContent  = gameState.perfect;
         this.finalGreat.textContent    = gameState.great;
         this.finalMiss.textContent     = gameState.miss;
-
-        if (renderer) {
-            renderer.drawLineChart(gameState.performanceHistory);
-        }
 
         this.resultScreen.classList.remove('hidden');
         this._enterResult();
@@ -2343,25 +2734,90 @@ class UIManager {
         el.classList.add('enter-anim');
     }
 
-    /** 结算页入场：卡片上浮 + 等级弹跳 */
+    /** 重播结算进场，关闭或查看记录不改动实际数值。 */
     _enterResult() {
-        const card = document.getElementById('resultCard');
-        if (!card) return;
-        card.classList.remove('result-enter');
-        void card.offsetWidth;
-        card.classList.add('result-enter');
-        this._enterAnim(card);
-        if (this._resultEnterTimer) clearTimeout(this._resultEnterTimer);
-        this._resultEnterTimer = setTimeout(() => card.classList.remove('result-enter'), 600);
+        renderer?.drawLineChart(gameState.performanceHistory);
+        this._enterAnim('#resultCard');
+    }
+
+    /**
+     * 当前谱面的历史最佳分（不包含失败局）。
+     * 只匹配有明确谱面 ID 的记录。
+     */
+    _getPreviousBestScore(chartId, songName = this._runSongName) {
+        if (!chartId || typeof leaderboard === 'undefined') return null;
+        try {
+            const player = leaderboard.getPlayerName();
+            let best = null;
+            const names = chartId.startsWith('local:')
+                ? leaderboard.getAllSongSummaries().map(song => song.songName)
+                : [songName || 'Unknown'];
+            for (const r of names.flatMap(name => leaderboard.getRecords(name))) {
+                if (r.isFailed || r.rank === 'F' || r.chartId !== chartId ||
+                    (r.playerName || 'Local') !== player) continue;
+                const score = Number(r.score);
+                if (r.score != null && Number.isFinite(score) && (best === null || score > best)) best = score;
+            }
+            return best;
+        } catch {
+            return null;
+        }
+    }
+
+    _renderResultBest(previousBest, score, isFailed) {
+        if (!this.resultBest) return;
+        this.resultBest.classList.remove('is-new', 'is-best', 'is-failed');
+        if (isFailed) {
+            this.resultBest.classList.add('is-failed');
+            this.resultBest.innerHTML = previousBest === null
+                ? `<span class="result-best-tag">NO RECORD</span><span class="result-best-value">RUN FAILED</span>`
+                : `<span class="result-best-tag">BEST SCORE</span><span class="result-best-value">${previousBest.toLocaleString()}</span>`;
+            return;
+        }
+        if (previousBest === null || score > previousBest) {
+            const gain = previousBest === null ? null : score - previousBest;
+            this.resultBest.classList.add('is-new');
+            this.resultBest.innerHTML = `<span class="result-best-tag">NEW BEST</span>` +
+                (gain !== null ? `<span class="result-best-value">+${gain.toLocaleString()}</span>` : '');
+        } else {
+            this.resultBest.classList.add('is-best');
+            this.resultBest.innerHTML = `<span class="result-best-tag">BEST SCORE</span>` +
+                `<span class="result-best-value">${previousBest.toLocaleString()}</span>`;
+        }
     }
 
     // ========== 保存记录到排行榜 ==========
+    _recordChartId() {
+        if (selectedSongSource === 'library' && selectedLibrarySong?.id) {
+            return this._isChartSong(selectedLibrarySong)
+                ? selectedLibrarySong.id : `${selectedLibrarySong.id}:${selectedDifficulty}`;
+        }
+        if (selectedSongSource !== 'import') return null;
+        // 本地谱面可能同名；按音符签名区分，不用文件名猜测。
+        const chart = getLoadedChartData();
+        const key = this._localChartKey(chart?.notes || loadedMidiData?.events, chart ? 'fixed' : 'midi');
+        return key && !chart ? `${key}:${selectedDifficulty}` : key;
+    }
+
+    _localChartKey(notes, kind) {
+        if (!notes?.length) return null;
+        let hash = 2166136261;
+        for (const n of notes) {
+            const signature = `${n.time}|${n.track ?? n.noteNumber}|${n.type}|${n.endTime ?? n.duration}|${n.velocity ?? ''};`;
+            for (let i = 0; i < signature.length; i++) {
+                hash = Math.imul(hash ^ signature.charCodeAt(i), 16777619);
+            }
+        }
+        return `local:${kind}:${notes.length}:${(hash >>> 0).toString(16)}`;
+    }
+
     _saveToLeaderboard(accuracy, rank, isGameFailed) {
         if (typeof leaderboard === 'undefined') return;
 
         try {
             leaderboard.addRecord({
-                songName: selectedSongDisplayName || 'Unknown',
+                songName: this._runSongName,
+                chartId: this._runChartId,
                 date: new Date().toISOString(),
                 score: gameState.score,
                 accuracy: accuracy,
@@ -2370,7 +2826,7 @@ class UIManager {
                 great: gameState.great,
                 miss: gameState.miss,
                 rank: isGameFailed ? 'F' : rank,
-                difficulty: selectedDifficulty,
+                difficulty: this._runDifficulty,
                 speed: noteSpeed,
                 style: noteStyle,
                 isFailed: isGameFailed,
@@ -2538,7 +2994,8 @@ class UIManager {
             version: 1,
             exportedAt: now.toISOString(),
             playerName: typeof leaderboard !== 'undefined' ? leaderboard.getPlayerName() : 'Local',
-            songName: selectedSongDisplayName || 'Unknown',
+            songName: this._runSongName,
+            chartId: this._runChartId,
             date: now.toISOString(),
             score: gameState.score,
             accuracy: accuracy,
@@ -2547,7 +3004,7 @@ class UIManager {
             great: gameState.great,
             miss: gameState.miss,
             rank: rank,
-            difficulty: selectedDifficulty,
+            difficulty: this._runDifficulty,
             speed: noteSpeed,
             style: noteStyle,
             isFailed: gameState.health <= 0,
@@ -2622,10 +3079,17 @@ class UIManager {
 
     setDifficulty(diff) {
         selectedDifficulty = diff;
+        const key = selectedSongSource === 'import'
+            ? this._localChartKey(loadedMidiData?.events, 'midi')
+            : (!this._isChartSong(selectedLibrarySong) ? selectedLibrarySong?.id : null);
+        if (key != null) {
+            this._savedMidiDifficulties[key] = diff;
+            settingsStore.set('midiDifficulties', this._savedMidiDifficulties);
+        }
         document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
         const btn = document.querySelector(`.diff-btn[data-diff="${diff}"]`);
         if (btn) btn.classList.add('active');
-        this._syncSettingsToStore();
+        if (this._settingsMode === 'song' && loadedMidiData) this._renderMidiDifficultySummary();
     }
 
     setNoteStyle(style) {
@@ -2698,10 +3162,224 @@ class UIManager {
         }
     }
 
+    // ========== 音频延迟校准 ==========
+    /**
+     * 播放 120 BPM 节拍器并采样点按，计算建议偏移。
+     * 采用「最接近节拍的带符号偏差」：early 为负、late 为正；
+     * 结束后用中位数与 MAD 剔除离群值，再对保留样本取平均。
+     */
+    async _startCalibration() {
+        if (this._calStarting) return;
+        if (currentVolume <= 0) {
+            this._setCalibrationStatus('音量为 0 · 请调高音量后测量', 'warn');
+            return;
+        }
+        if (document.hidden) {
+            this._setCalibrationStatus('页面不可见，无法测量 · 请回到设置页', 'warn');
+            return;
+        }
+        this._calStarting = true;
+        try {
+            if (!audioEngine.context) audioEngine.init();
+            const ctx = audioEngine.context;
+            if (!ctx) {
+                this._setCalibrationStatus('音频初始化失败 · 请重新打开设置页', 'warn');
+                return;
+            }
+            this._setCalibrationStatus('正在启动音频…', 'listening');
+            try { await ctx.resume(); } catch { /* 状态检查会兜底 */ }
+            // 等待期间页面可能被关闭/隐藏，避免在后台启动节拍器
+            if (document.hidden || this._settingsMode !== 'global' ||
+                this.settingsScreen.classList.contains('hidden')) {
+                this._setCalibrationStatus('测量已取消 · 请重新开始', 'warn');
+                return;
+            }
+            if (ctx.state !== 'running') {
+                this._setCalibrationStatus('音频未启动 · 点击页面后重试', 'warn');
+                return;
+            }
+
+            this._teardownCalibration(this._calibration);
+            this._stopPreview();
+            this._calSuggestion = null;
+
+            const interval = 0.5;          // 120 BPM
+            const beats = 13;              // 2 拍预备 + 11 拍可采样
+            const countIn = 2;
+            const startAt = ctx.currentTime + 0.35;
+            const state = {
+                active: true,
+                interval,
+                countIn,
+                beats,
+                startAt,
+                lastBeat: -1,
+                samples: [],
+                oscillators: [],
+                timer: null,
+                lastTapAt: -1
+            };
+            this._calibration = state;
+
+            for (let i = 0; i < beats; i++) {
+                this._scheduleCalibrationClick(ctx, startAt + i * interval, i % 4 === 0);
+            }
+
+            const endAt = startAt + (beats - 0.5) * interval;
+            state.timer = setTimeout(() => this._finishCalibration(), Math.max(0, (endAt - ctx.currentTime) * 1000));
+
+            this.calibrationPad.disabled = false;
+            this.calibrationPad.classList.add('active');
+            this.calibrationStart.textContent = 'STOP';
+            this.calibrationApply.disabled = true;
+            this.calibrationPadSub.textContent = '跟随节拍点击 · 0 / 10';
+            this._setCalibrationStatus('聆听节拍 · 2 拍预备后开始计数', 'listening');
+        } finally {
+            this._calStarting = false;
+        }
+    }
+
+    _scheduleCalibrationClick(ctx, time, accent) {
+        const state = this._calibration;
+        if (!state) return;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = accent ? 1760 : 1320;
+        gain.gain.setValueAtTime(0.0001, time);
+        gain.gain.exponentialRampToValueAtTime(accent ? 0.2 : 0.14, time + 0.004);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.055);
+        osc.connect(gain);
+        // 与游戏音频走同一个输出链路，并遵守全局音量。
+        gain.connect(audioEngine.masterGain);
+        osc.start(time);
+        osc.stop(time + 0.07);
+        state.oscillators.push(osc);
+    }
+
+    _recordCalibrationTap() {
+        const state = this._calibration;
+        if (!state || !state.active) return;
+        const ctx = audioEngine.context;
+        if (ctx?.state !== 'running') return;
+        const now = ctx.currentTime;
+        if (now < state.startAt) return;
+
+        // 物理按键抖动 / 连击去重
+        if (state.lastTapAt >= 0 && now - state.lastTapAt < 0.2) return;
+
+        const rel = (now - state.startAt) / state.interval;
+        const beatIndex = Math.round(rel);
+        if (beatIndex < state.countIn || beatIndex >= state.beats || beatIndex <= state.lastBeat) return;
+
+        const deltaMs = (now - (state.startAt + beatIndex * state.interval)) * 1000;
+        state.lastBeat = beatIndex;
+        state.lastTapAt = now;
+        state.samples.push(deltaMs);
+        const n = state.samples.length;
+        this.calibrationPadSub.textContent = `跟随节拍点击 · ${n} / 10`;
+        this._setCalibrationStatus(`已采样 ${n} 次 · 保持稳定`, 'sampling');
+        this.calibrationPad.classList.remove('hit');
+        void this.calibrationPad.offsetWidth;
+        this.calibrationPad.classList.add('hit');
+
+        if (n >= 10) this._finishCalibration();
+    }
+
+    _finishCalibration() {
+        const state = this._calibration;
+        if (!state) return;
+        this._teardownCalibration(state);
+
+        if (state.samples.length < 5) {
+            this._setCalibrationStatus(
+                `样本不足（${state.samples.length}/10）· 请重新测量`,
+                'warn'
+            );
+            return;
+        }
+
+        const samples = state.samples.slice().sort((a, b) => a - b);
+        const median = samples[Math.floor(samples.length / 2)];
+        const deviations = samples.map(v => Math.abs(v - median)).sort((a, b) => a - b);
+        const mad = deviations[Math.floor(deviations.length / 2)];
+        const limit = Math.max(28, mad * 2.5);
+        const kept = samples.filter(v => Math.abs(v - median) <= limit);
+        const mean = kept.reduce((sum, v) => sum + v, 0) / kept.length;
+        const spread = Math.sqrt(
+            kept.reduce((sum, v) => sum + (v - mean) ** 2, 0) / kept.length
+        );
+
+        // 点按节奏本身不稳定时，平均值没有校准意义；宁可要求重测。
+        if (kept.length < 5 || spread > 75) {
+            this._setCalibrationStatus(
+                `节奏不够稳定（±${Math.round(spread)}ms）· 请跟随节拍重测`,
+                'warn'
+            );
+            this.calibrationPadSub.textContent = '测量未保存 · 可重新开始';
+            return;
+        }
+
+        const suggestion = Math.max(-200, Math.min(200, Math.round(mean)));
+        const dropped = state.samples.length - kept.length;
+
+        this._calSuggestion = suggestion;
+        this.calibrationApply.disabled = false;
+        this._setCalibrationStatus(
+            `建议偏移 ${suggestion > 0 ? '+' : ''}${suggestion}ms · ` +
+            `${kept.length} 个样本${dropped ? `，剔除 ${dropped} 个离群值` : ''}`,
+            'ready'
+        );
+        this.calibrationPadSub.textContent = '测量完成 · 可应用建议或再测一次';
+    }
+
+    _applyCalibrationSuggestion() {
+        if (this._calSuggestion === null || this._calSuggestion === undefined) return;
+        this.setAudioOffset(this._calSuggestion);
+        this._setCalibrationStatus(
+            `已应用 ${this._calSuggestion > 0 ? '+' : ''}${this._calSuggestion}ms · 用实际歌曲再微调`,
+            'applied'
+        );
+        this.calibrationApply.disabled = true;
+        this._calSuggestion = null;
+    }
+
+    /** 停止并清理当前测量（不改动已应用的偏移） */
+    _teardownCalibration(state) {
+        if (!state) return;
+        state.active = false;
+        if (state.timer) clearTimeout(state.timer);
+        state.oscillators.forEach((osc) => {
+            try { osc.stop(); } catch { /* 已停止 */ }
+        });
+        state.oscillators.length = 0;
+        if (this._calibration === state) this._calibration = null;
+        if (this.calibrationPad) {
+            this.calibrationPad.classList.remove('active', 'hit');
+            this.calibrationPad.disabled = true;
+        }
+        if (this.calibrationStart) this.calibrationStart.textContent = 'START TAPPING';
+        if (this.calibrationApply) this.calibrationApply.disabled = true;
+        if (this.calibrationPadSub) this.calibrationPadSub.textContent = 'START TAPPING TO MEASURE';
+    }
+
+    _stopCalibration() {
+        this._teardownCalibration(this._calibration);
+        this._calSuggestion = null;
+        this.calibrationApply.disabled = true;
+        this._setCalibrationStatus('准备测量 · 120 BPM', 'idle');
+    }
+
+    _setCalibrationStatus(text, tone = 'idle') {
+        if (!this.calibrationStatus) return;
+        this.calibrationStatus.textContent = text;
+        this.calibrationStatus.dataset.tone = tone;
+    }
+
     // ========== 全局偏移控制 ==========
     setAudioOffset(ms, updateUI) {
-        // 限制在 -100 ~ +100 范围
-        audioOffsetMs = Math.max(-100, Math.min(100, ms));
+        // 限制在 -200 ~ +200 范围（覆盖蓝牙耳机的较高延迟）
+        audioOffsetMs = Math.max(-200, Math.min(200, ms));
 
         if (this.offsetSlider) {
             this.offsetSlider.value = audioOffsetMs;
@@ -2717,6 +3395,10 @@ class UIManager {
     setVolume(level) {
         // 限制在 0-10 范围
         currentVolume = Math.max(0, Math.min(10, level));
+        if (currentVolume === 0 && this._calibration?.active) {
+            this._stopCalibration();
+            this._setCalibrationStatus('音量为 0 · 测量已停止', 'warn');
+        }
 
         // 同步到音频引擎
         audioEngine.setVolume(currentVolume);
@@ -2745,7 +3427,8 @@ class UIManager {
             }
 
             // 开始画面按 Enter
-            if (gameState.screen === 'start' && key === 'enter') {
+            if (key === 'enter' && !this.startScreen.classList.contains('hidden') &&
+                !e.target.closest?.('button, a, [role="button"]')) {
                 e.preventDefault();
                 this.handleStartOrConfig();
                 return;
@@ -3214,15 +3897,17 @@ class UIManager {
         if (this.leaderboardScreen) {
             this.leaderboardScreen.classList.add('hidden');
         }
-        // 重置游戏状态，确保界面干净
-        gameState.reset();
-        if (renderer) renderer.resetPools();
         if (this._lbOrigin === 'result' && this.resultScreen) {
             // 从结算页面进入：返回结算页面（保留成绩显示）
+            gameState.screen = 'result';
             this.resultScreen.classList.remove('hidden');
             this.startScreen.classList.add('hidden');
+            this._enterResult();
         } else {
-            // 从开始画面进入：返回开始画面（静态背景，绘制一帧即可）
+            // 从开始画面进入：恢复开始状态（静态背景，绘制一帧即可）
+            gameState.reset();
+            if (renderer) renderer.resetPools();
+            gameState.screen = 'start';
             this.startScreen.classList.remove('hidden');
             repaintStartScreen();
         }
@@ -3300,46 +3985,69 @@ class UIManager {
             return;
         }
 
-        let html = '';
-        records.forEach((r, i) => {
-            const dateStr = new Date(r.date).toLocaleDateString();
-            const timeStr = new Date(r.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const rankClass = this._getRecordRankClass(r.rank);
-
-            // 排名标记
-            let rankIcon = '';
-            if (sortBy === 'score' || sortBy === 'accuracy') {
-                if (i === 0) rankIcon = '<span class="lb-record-rank top1">1</span>';
-                else if (i === 1) rankIcon = '<span class="lb-record-rank top2">2</span>';
-                else if (i === 2) rankIcon = '<span class="lb-record-rank top3">3</span>';
-                else rankIcon = `<span class="lb-record-rank">${i + 1}</span>`;
-            } else {
-                rankIcon = `<span class="lb-record-rank">${i + 1}</span>`;
+        // 曲库谱面按稳定 ID 分组；旧记录仅在曲名唯一时合并到对应曲库条目。
+        const songsByTitle = new Map();
+        for (const song of songLibrary) {
+            songsByTitle.set(song.title, songsByTitle.has(song.title) ? null : song);
+        }
+        // 导入数据可能把分数存成字符串，统一转成有限数值再比较。
+        const scoreOf = r => {
+            const n = Number(r.score);
+            return Number.isFinite(n) ? n : 0;
+        };
+        const best = new Map();
+        const chartKey = r => {
+            const song = songsByTitle.get(r.songName);
+            if (r.chartId || song?.id) {
+                const id = r.chartId || (this._isChartSong(song) ? song.id : `${song.id}:${r.difficulty}`);
+                return JSON.stringify([r.playerName, 'library', id]);
             }
-
-            html += `
-                <div class="lb-record" data-record-id="${r.id}" data-song="${this._escapeAttr(r.songName)}">
-                    ${rankIcon}
-                    <div class="lb-record-info">
-                        <span class="lb-record-name">${this.escapeHTML(r.songName)}</span>
-                        <span class="lb-record-meta">${r.playerName} · ${r.difficulty.toUpperCase()} · ${r.speed.toFixed(1)}x · ${dateStr} ${timeStr}</span>
-                    </div>
-                    <div class="lb-record-stats">
-                        <span class="lb-record-score">${r.score.toLocaleString()}</span>
-                        <span class="lb-record-acc">${r.accuracy.toFixed(2)}%</span>
-                    </div>
-                    <span class="lb-record-rank-badge ${rankClass}">${r.rank}</span>
-                </div>`;
+            return songsByTitle.has(r.songName) ? null : JSON.stringify([r.playerName, 'import', r.songName, r.difficulty]);
+        };
+        records.forEach(r => {
+            if (r.isFailed || r.rank === 'F') return;
+            const key = chartKey(r);
+            if (!key) return;
+            const score = scoreOf(r);
+            const previous = best.get(key);
+            if (!previous || score > scoreOf(previous) || (score === scoreOf(previous) && r.date < previous.date)) {
+                best.set(key, r);
+            }
         });
 
-        this.lbList.innerHTML = html;
+        this.lbList.innerHTML = records.map((r, i) => {
+            const date = new Date(r.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+            const isBest = best.get(chartKey(r)) === r;
+            const rank = this._recordRank(r.rank);
+            const [p, g, m] = [r.perfect, r.great, r.miss].map(n => Math.max(0, Number(n) || 0));
+            const total = p + g + m;
+            return `
+                <button type="button" class="lb-record record-ticket${isBest ? ' is-best' : ''}">
+                    <span class="rank-stamp ${this._getRecordRankClass(rank)}" aria-hidden="true">${rank}</span>
+                    <span class="sr-only">Rank ${rank}.</span>
+                    <span class="record-identity">
+                        <span class="record-index">${String(i + 1).padStart(2, '0')}${isBest ? ' / PERSONAL BEST' : ''}</span>
+                        <span class="lb-record-name">${this.escapeHTML(r.songName)}</span>
+                        <span class="lb-record-meta">${this.escapeHTML(r.difficulty)} · ${this.escapeHTML(r.playerName)}</span>
+                    </span>
+                    <span class="record-totals">
+                        <span class="lb-record-score">${scoreOf(r).toLocaleString()}</span>
+                        <span class="lb-record-acc">${(Number(r.accuracy) || 0).toFixed(2)}%</span>
+                    </span>
+                    <span class="record-receipt">
+                        <span class="record-date">${this.escapeHTML(date)}</span>
+                        <span class="record-judges" aria-hidden="true" style="--p:${total ? p / total : 0};--g:${total ? g / total : 0};--m:${total ? m / total : 0}">
+                            <span></span><span></span><span></span>
+                        </span>
+                        <span class="record-counts">P ${p} · G ${g} · M ${m}</span>
+                    </span>
+                </button>`;
+        }).join('');
 
-        // 绑定点击事件以展开详情
-        this.lbList.querySelectorAll('.lb-record').forEach(recordEl => {
-            recordEl.addEventListener('click', () => {
-                const recordId = recordEl.dataset.recordId;
-                const songName = recordEl.dataset.song;
-                this._showRecordDetail(songName, recordId);
+        this.lbList.querySelectorAll('.record-ticket').forEach((button, i) => {
+            button.addEventListener('click', () => {
+                const r = records[i];
+                this._showRecordDetail(r.songName, r.id);
             });
         });
     }
@@ -3360,34 +4068,35 @@ class UIManager {
 
         // 更新统计信息
         if (this.lbDetailStats) {
+            const rank = this._recordRank(record.rank);
             this.lbDetailStats.innerHTML = `
                 <div class="stat-mini">
                     <span class="stat-mini-label">SCORE</span>
-                    <span class="stat-mini-value">${record.score.toLocaleString()}</span>
+                    <span class="stat-mini-value">${(Number(record.score) || 0).toLocaleString()}</span>
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">ACC</span>
-                    <span class="stat-mini-value">${record.accuracy.toFixed(2)}%</span>
+                    <span class="stat-mini-value">${(Number(record.accuracy) || 0).toFixed(2)}%</span>
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">MAX COMBO</span>
-                    <span class="stat-mini-value">${record.maxCombo}</span>
+                    <span class="stat-mini-value">${Number(record.maxCombo) || 0}</span>
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">RANK</span>
-                    <span class="stat-mini-value" style="color:${this._getRankColor(record.rank)}">${record.rank}</span>
+                    <span class="rank-stamp ${this._getRecordRankClass(rank)}">${rank}</span>
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">PERFECT</span>
-                    <span class="stat-mini-value" style="color:#ffd43b">${record.perfect}</span>
+                    <span class="stat-mini-value" style="color:#f4cf7b">${Number(record.perfect) || 0}</span>
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">GREAT</span>
-                    <span class="stat-mini-value" style="color:#69db7c">${record.great}</span>
+                    <span class="stat-mini-value" style="color:#94cce1">${Number(record.great) || 0}</span>
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">MISS</span>
-                    <span class="stat-mini-value" style="color:#ff6b6b">${record.miss}</span>
+                    <span class="stat-mini-value" style="color:#ed938e">${Number(record.miss) || 0}</span>
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">SPEED</span>
@@ -3681,6 +4390,10 @@ class UIManager {
         reader.readAsText(file);
     }
 
+    _recordRank(rank) {
+        return typeof rank === 'string' && /^[φVSABCF]$/.test(rank) ? rank : 'C';
+    }
+
     /** 获取记录排名等级 CSS class */
     _getRecordRankClass(rank) {
         switch (rank) {
@@ -3693,25 +4406,6 @@ class UIManager {
             case 'F': return 'rank-f';
             default: return 'rank-c';
         }
-    }
-
-    /** 获取排名颜色 */
-    _getRankColor(rank) {
-        switch (rank) {
-            case 'φ': return '#ffd700';
-            case 'V': return '#e0e0e0';
-            case 'S': return '#ffd43b';
-            case 'A': return '#4dabf7';
-            case 'B': return '#69db7c';
-            case 'C': return '#ffffff';
-            case 'F': return '#ff6b6b';
-            default: return '#ffffff';
-        }
-    }
-
-    /** HTML 属性转义 */
-    _escapeAttr(str) {
-        return (str || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     /**
@@ -3766,6 +4460,8 @@ class UIManager {
                     gameState.activeHolds[track] = null;
                     gameState.holdReleaseTimes[track] = 0;
 
+                    if (typeof renderer.markHoldMiss === 'function') renderer.markHoldMiss(holdNote, currentTime);
+
                     // 如果头部已被判定为 perfect/great，修正为 miss
                     if (holdNote._headWasPerfect === true) {
                         gameState.perfect--;
@@ -3795,6 +4491,7 @@ class UIManager {
                 gameState.health = Math.min(CONFIG.health.initial, gameState.health + 1);
 
                 renderer.createLaser(track);
+                if (typeof audioEngine.playHoldEnd === 'function') audioEngine.playHoldEnd();
             }
         }
     }

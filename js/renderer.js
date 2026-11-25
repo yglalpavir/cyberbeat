@@ -23,8 +23,21 @@ const SKIN_DRAW = {
     showBar: false
 };
 
+// Hold 长条可读性：只改填充/描边/刻度的不透明度，不改长条起止点与命中几何。
+// pending=未按下，active=按住中，missed=漏击或提前松开（保留到尾部离屏作为反馈）。
+const HOLD_VIS = {
+    pending: { body: 0.38, skin: 0.66, edge: 0.9, tail: 0.72, tick: 0.22, head: 0.55 },
+    active: { body: 0.54, skin: 0.86, edge: 1.0, tail: 0.92, tick: 0.32, head: 0.9 },
+    missed: { body: 0.16, skin: 0.4, edge: 0.45, tail: 0.32, tick: 0.12, head: 0 }
+};
+const HOLD_MISS_COLOR = '#ff6b6b';
+// Hold 头部统一天空蓝：两种皮肤上都与轨道色 / 皮肤紫色拉开对比，Tap 仍用轨道色。
+const HOLD_HEAD_COLOR = '#87ceeb';
+
 // 触屏判定线按扣除安全区与拇指余量后的高度计算。
+// 横屏拇指活动范围更短，判定线再往下放一点，手势区更靠近底部。
 const MOBILE_HIT_FRACTION = 0.78;
+const MOBILE_LANDSCAPE_HIT_FRACTION = 0.82;
 const TOUCH_EDGE_PADDING = 16; // 外轨边缘放宽，横屏大面积留白仍不可触发打击
 const TOUCH_SLIDE_SLOP = 6;    // 滑动越过轨道分界后再走几像素，避免在边界反复换轨
 
@@ -207,18 +220,18 @@ class Renderer {
         const reservedBottom = this._safeBottom + 24;
         const availableHeight = Math.max(180, this.canvasHeight - reservedBottom);
         // 内置皮肤用 CONFIG.judgmentLineY；Malody 皮肤由脚本的 HITPOSITION 决定（越大越靠上）
-        let desiredY = this.skin
+        const desiredY = this.skin
             ? reservedBottom + (this.canvasHeight - reservedBottom) * this.skin.hitFraction
             : this.canvasHeight * CONFIG.judgmentLineY;
-
-        // 触屏仍可在判定线上下点按，只为拇指和手势条保留余量
-        if (IS_TOUCH_DEVICE) {
-            const mobileTargetY = reservedBottom + availableHeight * MOBILE_HIT_FRACTION;
-            desiredY = Math.min(desiredY, mobileTargetY);
-        }
-
         const maxY = Math.max(120, availableHeight - 18);
-        this._judgmentY = Math.min(Math.max(availableHeight * 0.62, Math.min(desiredY, maxY)), this.canvasHeight - 24);
+        const clampY = y => Math.min(Math.max(availableHeight * 0.62, Math.min(y, maxY)), this.canvasHeight - 24);
+        const touchY = fraction => clampY(Math.min(desiredY, reservedBottom + availableHeight * fraction));
+
+        // 横屏判定线再下移一点；自动漏击的离屏阈值仍按原位置计算，不改变漏击时机。
+        this._missJudgmentY = IS_TOUCH_DEVICE ? touchY(MOBILE_HIT_FRACTION) : clampY(desiredY);
+        this._judgmentY = IS_TOUCH_DEVICE && this.canvasWidth > this.canvasHeight
+            ? touchY(MOBILE_LANDSCAPE_HIT_FRACTION)
+            : this._missJudgmentY;
 
         // HUD 缩放（小屏使用较小字号，但不低于可读下限）
         this._hudScale = Math.max(0.78, Math.min(1, Math.min(this.canvasWidth, this.canvasHeight) / 480));
@@ -506,7 +519,7 @@ class Renderer {
         this._drawHitRings();
     }
 
-    /** Malody 皮肤：背景板 / 底部填充 / 键位列 / 按下列 / 接收器 / 判定线 */
+    /** Malody 皮肤：背景板 / 底部填充 / 按下列 / 接收器 / 判定线（键位列 Yhint 装饰层不绘制） */
     _drawSkinTracks() {
         const ctx = this.ctx;
         const skin = this.skin;
@@ -529,15 +542,11 @@ class Renderer {
         }
         this._drawEqualizer();
 
-        // 3. 键位列：从判定线一路铺到屏幕顶部。
-        // 皮肤脚本里的 key 贴图高度是 300（设计单位），若按原高绘制会在画面中部留下
-        // 一条横向顶边——看起来像多了一根判定线。铺满轨道高度后顶边移出画面，
-        // 只留两侧的轨道描边，底部圆角正好落在判定线上。
-        for (let i = 0; i < positions.length; i++) {
-            skin.drawLaneSprite(ctx, 'key', i, positions[i].x, 0, trackW, jy);
-        }
+        // 3. 键位列（Yhint1 / Yhint2）不绘制：这两张贴图的可见像素只有顶部的紫色横带与短条，
+        //    铺满判定线以上后横带会贴在屏幕顶端，看起来像多出一条紫色判定线。
+        //    它是纯装饰层，接收器与判定线仍完整标出轨道和判定位置。
 
-        // 4. 按下列：白底贴图按轨道色着色，opacity 来自脚本（35%），同样铺满判定线以上
+        // 4. 按下列：白底贴图按轨道色着色，opacity 来自脚本（35%），铺满判定线以上
         for (let i = 0; i < positions.length; i++) {
             if (!gameState.pressedKeys.has(KEYS[i])) continue;
             skin.drawLaneSprite(ctx, 'press', i, positions[i].x, 0, trackW, jy, {
@@ -773,6 +782,7 @@ class Renderer {
         const positions = this.trackPositions;
         const canvasH = this.canvasHeight;
         const judgmentY = this._judgmentY;
+        const missJudgmentY = this._missJudgmentY ?? judgmentY;
         const speedMul = noteSpeed * 100;
         const colors = TRACK_COLORS;
         const activeHolds = gameState.activeHolds;
@@ -804,6 +814,21 @@ class Renderer {
 
         let visibleCount = 0;
 
+        // 已按住或按断的长条不受主循环的头部时间窗口限制。
+        const firstDrawnTime = notes[startIdx] ? notes[startIdx].time : Infinity;
+        for (const note of activeHolds) {
+            if (note?.holdActive && note.endTime && note.time < firstDrawnTime &&
+                this._drawTrackedHold(note, currentTime, judgmentY, speedMul, 'active')) visibleCount++;
+        }
+        if (this._missedHolds) {
+            for (const note of this._missedHolds) {
+                const headY = judgmentY + (currentTime - note.time) * speedMul / 1000;
+                const tailY = judgmentY + (currentTime - note.endTime) * speedMul / 1000;
+                if (headY < -50 || tailY > canvasH) this._missedHolds.delete(note);
+                else if (this._drawTrackedHold(note, currentTime, judgmentY, speedMul, 'missed')) visibleCount++;
+            }
+        }
+
         for (let i = startIdx; i < noteCount; i++) {
             const note = notes[i];
 
@@ -817,11 +842,11 @@ class Renderer {
 
             // 跳过已完成的 tap
             if (note.hit && note.type !== 'hold') continue;
-            // 跳过已完成且不活跃的 hold
-            if (note.type === 'hold' && note.hit && !note.holdActive) continue;
+            // 已断长条由独立集合绘制，成功完成的长条不再显示。
+            if (note.type === 'hold' && (note.missed || note.holdReleased || (note.hit && !note.holdActive))) continue;
 
-            const timeDiff = note.time - currentTime;
-            const rawY = judgmentY - (timeDiff / 1000) * speedMul;
+            const offsetY = ((note.time - currentTime) / 1000) * speedMul;
+            const rawY = judgmentY - offsetY;
 
             // === Hold 长条 ===
             if (note.type === 'hold' && note.endTime) {
@@ -835,8 +860,8 @@ class Renderer {
                     ? Math.max(0, Math.min(1, (currentTime - note.startTime) / (note.endTime - note.startTime)))
                     : 0;
 
-                // Miss: 头部已过屏幕底部且未命中
-                if (rawY > canvasH + 100 && !note.hit) {
+                // Miss: 头部已过离屏阈值且未命中
+                if (missJudgmentY - offsetY > canvasH + 100 && !note.hit) {
                     if (this._dt > 0 && !note.missed) {
                         note.missed = true;
                         note.hit = true;
@@ -846,6 +871,7 @@ class Renderer {
                         gameState.intervalStats.miss++;
                         gameState.combo = 0;
                         gameState.health = Math.max(0, gameState.health - lossOnMiss);
+                        this.markHoldMiss(note, currentTime);
                         this._addMissEffect(note.track);
                         audioEngine.playHitSound('miss');
                     }
@@ -860,8 +886,8 @@ class Renderer {
                 const yBottom = rawY > yEnd ? rawY : yEnd;
                 const visYTop = yTop > -50 ? yTop : -50;
                 const visYBot = yBottom < canvasH ? yBottom : canvasH;
-
-                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], note.holdActive, holdProgress, note.track, currentTime);
+                const holdState = note.holdActive ? 'active' : 'pending';
+                this._drawHoldBody(pos.x, visYTop, visYBot, colors[note.track], holdState, holdProgress, note.track, currentTime);
                 visibleCount++;
                 continue;
             }
@@ -874,8 +900,8 @@ class Renderer {
             }
             tapAboveStreak = 0;
 
-            // 已过底部 → Miss
-            if (rawY > canvasH + 100) {
+            // 已过离屏阈值 → Miss
+            if (missJudgmentY - offsetY > canvasH + 100) {
                 if (this._dt > 0 && !note.missed) {
                     note.missed = true;
                     note.hit = true;
@@ -899,21 +925,52 @@ class Renderer {
         perfMonitor.totalNotes = noteCount;
     }
 
+    _drawTrackedHold(note, time, judgmentY, speed, state) {
+        const headY = judgmentY + (time - note.time) * speed / 1000;
+        const tailY = judgmentY + (time - note.endTime) * speed / 1000;
+        if (headY < -50 || tailY > this.canvasHeight) return false;
+        const start = note.startTime ?? note.time;
+        const progress = state === 'active' && note.endTime > start
+            ? Math.max(0, Math.min(1, (time - start) / (note.endTime - start))) : 0;
+        note.y = headY;
+        this._drawHoldBody(this.trackPositions[note.track].x, Math.max(-50, tailY), Math.min(this.canvasHeight, headY),
+            TRACK_COLORS[note.track], state, progress, note.track, time, note._holdMissedAt);
+        return true;
+    }
+
+    /**
+     * 标记 Hold 漏击 / 提前松开。只改视觉状态，不改时间、判定或几何。
+     * @param {Object} note
+     * @param {number} [currentTime] 谱面时钟（ms），用于漏击反馈的短暂淡出
+     */
+    markHoldMiss(note, currentTime) {
+        if (!note || note.type !== 'hold') return;
+        note._holdMissedAt = Number.isFinite(currentTime) ? currentTime : 0;
+        (this._missedHolds ??= new Set()).add(note);
+    }
+
     /**
      * 绘制 Hold 长条体
-     * 内置扁平：实色块 + 1px 描边；Malody 皮肤：YnoteL 长条体 + YnoteT 尾部
-     * @param {boolean} isActive - 是否按住中
+     * 内置扁平：实色块 + 2px 描边；Malody 皮肤：YnoteL 长条体 + YnoteT 尾部
+     * @param {'pending'|'active'|'missed'} state - 未按下 / 按住中 / 已漏击
      * @param {number} holdProgress - 按住进度 0~1（未按住时为 0）
      * @param {number} [track] - 轨道索引（皮肤按轨道取贴图）
      */
-    _drawHoldBody(x, yTop, yBottom, color, isActive, holdProgress, track, currentTime) {
+    _drawHoldBody(x, yTop, yBottom, color, state, holdProgress, track, currentTime, missedAt) {
         const skin = this.skin;
         if (skin && this.spritesReady) {
-            this._drawSkinHoldBody(x, yTop, yBottom, isActive, holdProgress, track);
+            this._drawSkinHoldBody(x, yTop, yBottom, state, holdProgress, track, currentTime, missedAt);
             return;
         }
 
         const ctx = this.ctx;
+        const vis = HOLD_VIS[state] || HOLD_VIS.pending;
+        const missed = state === 'missed';
+        const active = state === 'active';
+        const bodyColor = missed ? HOLD_MISS_COLOR : color;
+        const missFade = missed && missedAt > 0
+            ? Math.max(0.55, 1 - (currentTime - missedAt) / 700 * 0.45)
+            : 1;
         const trackW = CONFIG.trackWidth;
         const bodyW = trackW - 8;
         const bodyX = x + 4;
@@ -923,52 +980,57 @@ class Renderer {
         const radius = noteStyle === 'pixel' ? 1 : 3;
 
         if (bodyHeight > 0) {
-            // 长条主体：低调实色
-            ctx.fillStyle = _withAlpha(color, isActive ? 0.32 : 0.22);
+            // 长条主体：pending/active/missed 三档明度，保证轨道底色上仍然可读
+            ctx.fillStyle = _withAlpha(bodyColor, vis.body * missFade);
             ctx.fillRect(bodyX, bodyTop, bodyW, bodyHeight);
 
-            // 左右 1px 描边，替代高光条
-            ctx.fillStyle = _withAlpha(color, isActive ? 0.9 : 0.6);
-            ctx.fillRect(bodyX, bodyTop, 1, bodyHeight);
-            ctx.fillRect(bodyX + bodyW - 1, bodyTop, 1, bodyHeight);
+            // 左右 2px 描边：比旧版更清楚，但不改变长条宽度
+            ctx.fillStyle = _withAlpha(bodyColor, vis.edge * missFade);
+            ctx.fillRect(bodyX, bodyTop, 2, bodyHeight);
+            ctx.fillRect(bodyX + bodyW - 2, bodyTop, 2, bodyHeight);
 
             // 按住进度：从判定线一侧向上生长的实色块
-            if (isActive && holdProgress > 0) {
+            if (active && holdProgress > 0) {
                 const litH = Math.max(2, bodyHeight * Math.min(1, holdProgress));
-                ctx.fillStyle = _withAlpha(color, 0.75);
-                ctx.fillRect(bodyX + 1, yBottom - litH, bodyW - 2, litH);
+                ctx.fillStyle = _withAlpha(color, 0.72);
+                ctx.fillRect(bodyX + 2, yBottom - litH, bodyW - 4, litH);
 
-                // 进度前沿：1px 实色亮线，跟着手指/按键推进
-                ctx.fillStyle = _withAlpha(color, 0.95);
-                ctx.fillRect(bodyX + 1, yBottom - litH, bodyW - 2, 1);
+                // 进度前沿：2px 白色亮线，和轨道色形成明确分界
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                ctx.fillRect(bodyX + 2, yBottom - litH, bodyW - 4, 2);
             }
 
-            // 长条内部流动刻度：向判定线方向缓慢推进，强调“正在被消耗”
-            if (this._motionEnabled && isActive) {
+            // 内部刻度：pending 静态、active 缓慢流动；missed 只留很淡的残影
+            if (bodyHeight > 8) {
                 const gap = 40;
-                const flow = (Math.max(0, currentTime) / 12) % gap;
+                const flow = (this._motionEnabled && active)
+                    ? (Math.max(0, currentTime) / 12) % gap
+                    : 0;
                 const end = Math.min(bodyHeight - 1, gap * 8);
-                ctx.fillStyle = _withAlpha(color, 0.3);
+                ctx.fillStyle = _withAlpha(bodyColor, vis.tick * missFade);
                 for (let offset = flow; offset <= end; offset += gap) {
                     ctx.fillRect(bodyX + 2, bodyTop + offset, bodyW - 4, 1);
                 }
             }
         }
 
-        // 头部（判定线一侧）：与 Tap 同款扁平块
-        if (yBottom > -50 && yBottom < this.canvasHeight) {
-            this._drawNoteByStyle(x, yBottom, color, track);
+        // 头部（判定线一侧）：与 Tap 同款扁平块；头部统一天空蓝，漏击后不再画头，只留下方断条
+        if (!missed && yBottom > -50 && yBottom < this.canvasHeight) {
+            this._drawNoteByStyle(x, yBottom, HOLD_HEAD_COLOR, track);
+            // Hold 头部内侧的 2px 亮线：与 Tap 区分，不改变音符盒尺寸
+            ctx.fillStyle = `rgba(255, 255, 255, ${vis.head})`;
+            ctx.fillRect(x + 4, yBottom + 23, Math.max(1, trackW - 8), 2);
         }
 
         // 尾部：较薄的扁平块
         if (yTop > -50 && yTop < this.canvasHeight) {
             const tailX = bodyX;
             const tailW = bodyW;
-            ctx.fillStyle = _withAlpha(color, 0.55);
+            ctx.fillStyle = _withAlpha(bodyColor, vis.tail * missFade);
             ctx.beginPath();
             ctx.roundRect(tailX, yTop, tailW, tailH, radius);
             ctx.fill();
-            ctx.strokeStyle = _withAlpha(color, 0.75);
+            ctx.strokeStyle = _withAlpha(bodyColor, Math.min(1, vis.tail + 0.18) * missFade);
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.roundRect(tailX + 0.5, yTop + 0.5, tailW - 1, tailH - 1, radius);
@@ -977,21 +1039,34 @@ class Renderer {
     }
 
     /** Malody 皮肤长条：tex2=YnoteL 长条体，tex3=YnoteT 尾端，头部用音符贴图 */
-    _drawSkinHoldBody(x, yTop, yBottom, isActive, holdProgress, track) {
+    _drawSkinHoldBody(x, yTop, yBottom, state, holdProgress, track, currentTime, missedAt) {
         const ctx = this.ctx;
         const skin = this.skin;
         const s = this._skinScale;
+        const vis = HOLD_VIS[state] || HOLD_VIS.pending;
+        const missed = state === 'missed';
+        const active = state === 'active';
         const noteH = skin.layout.noteHeight * s;
         const tailH = Math.min(noteH, Math.max(10, noteH * 0.6));
         const bodyTop = yTop + tailH;
         const bodyH = yBottom - bodyTop;
+        const tint = missed ? HOLD_MISS_COLOR : null;
+        const missFade = missed && missedAt > 0
+            ? Math.max(0.55, 1 - (currentTime - missedAt) / 700 * 0.45)
+            : 1;
 
         if (bodyH > 0) {
             const bodyName = skin.spriteNameOf(skin.laneElement('note', track), ['tex2']) || 'YnoteL';
-            // 底：半透明长条体
-            skin.drawSprite(ctx, bodyName, x, bodyTop, CONFIG.trackWidth, bodyH, { alpha: 0.6 });
+            // 底：半透明长条体；missed 用红色 tint 明确“已断”
+            const bodyOpts = { alpha: vis.skin * missFade };
+            if (tint) bodyOpts.tint = tint;
+            const bodyDrawn = skin.drawSprite(ctx, bodyName, x, bodyTop, CONFIG.trackWidth, bodyH, bodyOpts);
+            if (!bodyDrawn) {
+                ctx.fillStyle = _withAlpha(missed ? HOLD_MISS_COLOR : skin.laneColor(track), vis.body * missFade);
+                ctx.fillRect(x, bodyTop, CONFIG.trackWidth, bodyH);
+            }
             // 按住中：已判定的部分再画一层全不透明，表示进度
-            if (isActive && holdProgress > 0) {
+            if (active && holdProgress > 0) {
                 const litH = Math.max(2, bodyH * Math.min(1, holdProgress));
                 ctx.save();
                 ctx.beginPath();
@@ -1000,26 +1075,43 @@ class Renderer {
                 skin.drawSprite(ctx, bodyName, x, bodyTop, CONFIG.trackWidth, bodyH, { alpha: 1 });
                 ctx.restore();
             }
+            // 1px 外框：皮肤贴图本身可能和轨道同色，加一圈边界保证可读性
+            ctx.strokeStyle = _withAlpha(missed ? HOLD_MISS_COLOR : skin.laneColor(track), (missed ? 0.5 : 0.8) * missFade);
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x + 0.5, bodyTop + 0.5, CONFIG.trackWidth - 1, bodyH - 1);
         }
 
-        // 头部
-        if (yBottom > -50 && yBottom < this.canvasHeight) {
-            this._drawNoteByStyle(x, yBottom, '#947FFF', track);
+        // 头部：统一天空蓝（皮肤音符贴图用 tint 着色），missed 不画头
+        if (!missed && yBottom > -50 && yBottom < this.canvasHeight) {
+            this._drawNoteByStyle(x, yBottom, HOLD_HEAD_COLOR, track, HOLD_HEAD_COLOR);
         }
 
         // 尾巴
         if (yTop > -50 && yTop < this.canvasHeight) {
             const tailName = skin.spriteNameOf(skin.laneElement('note', track), ['tex3']) || 'YnoteT';
-            skin.drawSprite(ctx, tailName, x, yTop, CONFIG.trackWidth, tailH, { alpha: 0.85 });
+            const tailOpts = { alpha: vis.tail * missFade };
+            if (tint) tailOpts.tint = tint;
+            const tailDrawn = skin.drawSprite(ctx, tailName, x, yTop, CONFIG.trackWidth, tailH, tailOpts);
+            if (!tailDrawn) {
+                ctx.fillStyle = _withAlpha(missed ? HOLD_MISS_COLOR : skin.laneColor(track), vis.tail * missFade);
+                ctx.fillRect(x, yTop, CONFIG.trackWidth, tailH);
+            }
         }
     }
 
-    _drawNoteByStyle(x, y, color, track = 0) {
+    /**
+     * 绘制音符头。
+     * @param {string} color 扁平皮肤的填充色
+     * @param {number} track 轨道索引（皮肤按轨道取贴图）
+     * @param {string|null} skinTint 皮肤贴图的着色（null = 用贴图原色）
+     */
+    _drawNoteByStyle(x, y, color, track = 0, skinTint = null) {
         const skin = this.skin;
         if (skin && this.spritesReady) {
             const noteH = skin.layout.noteHeight * this._skinScale;
             const name = skin.spriteNameOf(skin.laneElement('note', track), ['tex']);
-            if (name && skin.drawSprite(this.ctx, name, x, y + (24 - noteH) / 2, CONFIG.trackWidth, noteH)) return;
+            const opts = skinTint ? { tint: skinTint } : undefined;
+            if (name && skin.drawSprite(this.ctx, name, x, y + (24 - noteH) / 2, CONFIG.trackWidth, noteH, opts)) return;
         }
 
         const ctx = this.ctx;
@@ -1843,6 +1935,7 @@ class Renderer {
 
     // ========== 重置对象池 ==========
     resetPools() {
+        this._missedHolds?.clear();
         this._particlePoolIdx = 0;
         this._laserPoolIdx = 0;
         this._judgmentPoolIdx = 0;
