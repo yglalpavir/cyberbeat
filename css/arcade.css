@@ -65,8 +65,15 @@
 }
 #startScreen .song-card .card-arrow { transition: transform .23s var(--arrive), color .23s ease; }
 #startScreen .song-card:is(.selected, :hover) .card-arrow { transform: translateX(4px); color: var(--ice); }
-#startScreen :is(.song-card, .panel-tab, .btn):focus-visible,
+#startScreen :is(.song-card, .panel-tab, .btn, .sort-select, .sort-dir):focus-visible,
 :is(#resultScreen, #leaderboardScreen) :is(button, select, input):focus-visible { outline: 2px solid var(--gold); outline-offset: -3px; }
+#startScreen .song-sort-bar { background: #11171e; border-bottom-color: var(--cabinet-line); }
+#startScreen .sort-label { color: var(--ink); font-family: var(--tally); font-size: .6rem; letter-spacing: .12em; }
+#startScreen .sort-select { background-color: #1b222b; border-color: var(--cabinet-line); color: var(--paper); font-family: var(--tally); }
+#startScreen .sort-select:hover { border-color: #88bfd6; }
+#startScreen .sort-select option { background: #1b222b; color: var(--paper); }
+#startScreen .sort-dir { background: #1b222b; border-color: var(--cabinet-line); color: var(--ice); font-family: var(--tally); }
+#startScreen .sort-dir:hover { background: #253444; color: var(--paper); }
 #startScreen.hidden :is(.start-sidebar, .song-panel, .song-card) { animation: none; }
 #startScreen:not(.hidden) .start-sidebar { animation: cabinetIn .48s var(--arrive) both; }
 #startScreen:not(.hidden) .song-panel { animation: rackIn .54s var(--arrive) both; }
@@ -163,6 +170,12 @@
 #resultScreen :is(.stat-big, .stat-box, .chart-box) { background: #11171e; border-color: var(--cabinet-line); border-radius: 3px; }
 #resultScreen .stat-label, #resultScreen .chart-title { color: var(--ink); }
 #resultScreen .stat-big .stat-value { color: var(--paper); font-family: var(--tally); }
+#resultScreen .timing-split { background: #11171e; border-color: var(--cabinet-line); border-radius: 3px; }
+#resultScreen .timing-side { color: var(--ink); font-family: var(--tally); }
+#resultScreen .timing-side.early b { color: #83caff; }
+#resultScreen .timing-side.late b { color: #ff9298; }
+#resultScreen .timing-track { background: #0b1015; }
+#resultScreen .timing-unknown { border-color: var(--cabinet-line); color: var(--ink); background: #0b1015; }
 #resultScreen .chart-title { background: #11171e; font-family: var(--tally); }
 #resultScreen .result-actions { gap: 8px; }
 #resultScreen .result-actions .btn { border-radius: 3px; }
@@ -181,6 +194,7 @@
 #resultScreen .result-card.enter-anim .stat-box:nth-child(3) { animation-delay: .53s; }
 #resultScreen .result-card.enter-anim .stat-box:nth-child(4) { animation-delay: .58s; }
 #resultScreen .result-card.enter-anim .chart-box canvas { animation: chartFeed .66s var(--arrive) .52s both; }
+#resultScreen .result-card.enter-anim .timing-split { animation: resultLift .4s var(--arrive) .6s both; }
 #resultScreen .result-card.enter-anim .result-actions { animation: resultLift .4s var(--arrive) .48s both; }
 #resultScreen .result-card .result-actions:focus-within { animation: none; }
 @keyframes resultLift { from { opacity: 0; translate: 0 10px; } }
@@ -245,6 +259,9 @@
     white-space: nowrap;
 }
 .record-counts { color: var(--ink); font: .64rem/1.2 var(--tally); white-space: nowrap; }
+.record-counts .tc-early, .record-counts .tc-late { font-style: normal; }
+.record-counts .tc-early { color: #83caff; }
+.record-counts .tc-late { color: #ff9298; }
 .record-receipt {
     grid-column: 1 / -1;
     display: grid;
@@ -263,6 +280,13 @@
 #leaderboardScreen .lb-detail { border-top-color: var(--cabinet-line); }
 #leaderboardScreen .lb-detail .rank-stamp { --stamp-size: 26px; }
 #leaderboardScreen .lb-detail-chart { border-color: var(--cabinet-line); background: #11171e; }
+#leaderboardScreen .lb-detail-stats .timing-split { padding: 5px 7px; gap: 7px; background: #11171e; border-color: var(--cabinet-line); border-radius: 4px; }
+#leaderboardScreen .lb-detail-stats .timing-side { color: var(--ink); font-family: var(--tally); font-size: .55rem; }
+#leaderboardScreen .lb-detail-stats .timing-side.early b { color: #83caff; }
+#leaderboardScreen .lb-detail-stats .timing-side.late b { color: #ff9298; }
+#leaderboardScreen .lb-detail-stats .timing-track { background: #0b1015; height: 6px; }
+#leaderboardScreen .lb-detail-stats .timing-unknown { border-color: var(--cabinet-line); color: var(--ink); background: #0b1015; }
+#leaderboardScreen .lb-detail .timing-fill { animation: timingSpread .45s var(--arrive) both; }
 
 @media (min-width: 769px) and (min-height: 521px) {
     #resultScreen .result-card {

@@ -17,8 +17,13 @@ function asHost(value) {
 }
 
 test('all imported catalog entries have unique IDs and extant chart/audio paths', () => {
-    assert.equal(imported.length, 47);
+    assert.equal(imported.length, 114);
     assert.equal(new Set(imported.map(song => song.id)).size, imported.length);
+
+    // 「Stream Regular-5/7」已按需求下架：目录与资源都不应再引用它们
+    const titles = menu.songs.map(song => song.title);
+    assert.equal(titles.includes('Stream Regular-5'), false);
+    assert.equal(titles.includes('Stream Regular-7'), false);
 
     for (const song of imported) {
         assert.ok(song.title && song.artist && song.creator && song.version && song.origin, song.id);
@@ -78,5 +83,17 @@ test('all imported charts parse as playable 4K and retain catalog metadata/audio
                 `duplicate chart title ${title} needs distinct difficulty metadata`);
         }
     }
-    assert.deepEqual(counts, { osu: 28, mc: 19 });
+    assert.deepEqual(counts, { osu: 95, mc: 19 });
+});
+
+test('the three MiniJack packs are merged into one chart set ordered by level', () => {
+    const mini = menu.songs.filter(song => song.id.startsWith('mcz-140-minijack-practice-'));
+    assert.equal(mini.length, 5, 'all five MiniJack charts stay in the catalog');
+    assert.equal(new Set(mini.map(song => song.title)).size, 1, 'one shared song title groups them');
+    assert.equal(mini[0].title, '140 MiniJack Practice');
+    assert.equal(new Set(mini.map(song => song.difficultyName)).size, 5,
+        'each chart keeps its own difficulty name');
+    // 卡片上的等级区间按从低到高呈现
+    const levels = mini.map(song => song.level).sort((a, b) => a - b);
+    assert.deepEqual(levels, [19, 22, 22, 23, 24]);
 });

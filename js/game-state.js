@@ -36,9 +36,26 @@ class GameState {
         // 只有恢复倒计时使用墙钟；谱面和伴奏均停在音频时钟上。
         this.resumeCountdownUntil = 0; // performance.now() 时间戳；为 0 表示无恢复倒计时
         this.resumeCountdownRemaining = null; // 切后台时保存；null 表示无待续倒计时
-        // 最近一次打击的时序偏差（ms，负=偏早，正=偏晚），用于游玩界面判定偏移条
-        this.lastHitOffset = 0;
-        this.lastHitAt = 0;            // performance.now() 时间戳
+        this.early = 0;
+        this.late = 0;
+        this.timingHits = [];
+        this.timingCueAt = { early: -Infinity, late: -Infinity };
+    }
+
+    recordHitTiming(offset, time, isPerfect) {
+        this.timingHits.push({ offset, time, isPerfect });
+        if (isPerfect) return null;
+        const side = offset < 0 ? 'early' : 'late';
+        this[side]++;
+        this.timingCueAt[side] = time;
+        return side;
+    }
+
+    recentTimingHits(time) {
+        let expired = 0;
+        while (expired < this.timingHits.length && time - this.timingHits[expired].time >= 10000) expired++;
+        if (expired) this.timingHits.splice(0, expired);
+        return this.timingHits;
     }
 
     /**
@@ -116,6 +133,7 @@ class GameState {
         this.performanceHistory.push({
             time: this.currentTime(),
             intervalAcc: intervalAcc,
+            notes: total,
             totalAcc: this.calculateTotalAcc()
         });
         

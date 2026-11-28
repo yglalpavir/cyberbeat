@@ -1609,7 +1609,10 @@ class Renderer {
                 ctx.fillText(this._fitText(meta, maxTitleW, ctx), centerX, top + 20 * s);
             }
 
-            this._drawTimingBar(centerX, top + 42 * s);
+        }
+        if (!(gameState.resumeCountdownUntil > 0)) {
+            const timingY = w >= 780 ? top + 46 * s : Math.max(top + 110 * s, h * 0.34 + 46 * s);
+            this._drawTimingBar(w / 2, timingY, currentTime);
         }
 
         // ---- 中央连击：纯色数字，命中时放大 ----
@@ -1627,6 +1630,7 @@ class Renderer {
             ctx.font = `800 ${size}px ${HUD_MONO_STACK}`;
             ctx.fillStyle = hotCombo ? '#ffd43b' : '#ffffff';
             ctx.fillText(gameState.combo, comboX, comboY);
+            this._drawTimingCues(comboX, comboY, ctx.measureText(String(gameState.combo)).width / 2, currentTime);
 
             ctx.font = `700 ${10 * s}px ${HUD_FONT_STACK}`;
             ctx.globalAlpha = 0.7 + (this._motionEnabled ? this._beat * 0.3 : 0);
@@ -1716,43 +1720,71 @@ class Renderer {
         ctx.fillRect(x + playedW - 1, y - 2 - head, 2 + head * 2, barH + 4 + head * 2);
     }
 
-    /** 判定偏移条：显示最近一次打击的 EARLY / LATE 偏差（扁平刻度） */
-    _drawTimingBar(cx, y) {
-        const lastAt = gameState.lastHitAt || 0;
-        if (!lastAt) return;
-        const age = performance.now() - lastAt;
-        if (age > 1200) return;
-
+    /** 以谱面时钟衰减；同一位置的近期命中会叠得更亮。 */
+    _drawTimingBar(cx, y, time) {
+        const hits = gameState.recentTimingHits(time);
+        if (!hits.length) return;
         const ctx = this.ctx;
         const s = this._hudScale;
-        const width = Math.round(150 * s);
-        const barH = 4;
-        const x = Math.round(cx - width / 2);
-        const yTop = Math.round(y);
-        const range = 120; // ±120ms 映射到两端
+        const half = Math.round(88 * s);
+        const perfect = Math.round(half * CONFIG.perfectWindow / CONFIG.greatWindow);
+        const x = Math.round(cx);
+        const cy = Math.round(y);
+        ctx.save();
+        ctx.fillStyle = '#10151e';
+        ctx.fillRect(x - half - 8, cy - 9, half * 2 + 16, 28);
+        ctx.fillStyle = '#263e55';
+        ctx.fillRect(x - half, cy - 2, half - perfect, 5);
+        ctx.fillStyle = '#655537';
+        ctx.fillRect(x - perfect, cy - 2, perfect * 2, 5);
+        ctx.fillStyle = '#553035';
+        ctx.fillRect(x + perfect, cy - 2, half - perfect, 5);
 
-        ctx.globalAlpha = 0.4 + (1 - Math.min(1, age / 1200)) * 0.6;
-
-        // 轨道底
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-        ctx.fillRect(x, yTop, width, barH);
-
-        // PERFECT 窗口：实色块
-        const perfectW = Math.round((CONFIG.perfectWindow / range) * (width / 2));
-        ctx.fillStyle = 'rgba(255, 212, 59, 0.45)';
-        ctx.fillRect(Math.round(cx) - perfectW, yTop, perfectW * 2, barH);
-
-        // 中心基准线
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-        ctx.fillRect(Math.round(cx) - 1, yTop - 3, 2, barH + 6);
-
-        // 偏移标记：方形块
-        const offset = Math.max(-range, Math.min(range, gameState.lastHitOffset || 0));
-        const markerX = Math.round(cx + (offset / range) * (width / 2));
-        ctx.fillStyle = Math.abs(offset) <= CONFIG.perfectWindow ? '#ffd43b' : '#69db7c';
-        ctx.fillRect(markerX - 2, yTop - 4, 4, barH + 8);
-
+        for (const { offset, time: at, isPerfect } of hits) {
+            const age = Math.max(0, time - at);
+            const marker = Math.round(x + offset / CONFIG.greatWindow * half);
+            ctx.globalAlpha = 0.58 * (1 - age / 10000);
+            ctx.fillStyle = isPerfect ? '#ffd779' : offset < 0 ? '#83caff' : '#ff9298';
+            ctx.fillRect(marker - 1, cy - 6, 2, 13);
+        }
         ctx.globalAlpha = 1;
+        ctx.fillStyle = '#e9e5de';
+        ctx.fillRect(x, cy - 8, 1, 3);
+        ctx.font = `600 ${Math.max(9, 10 * s)}px ${HUD_MONO_STACK}`;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#83caff';
+        ctx.fillText(`−${CONFIG.greatWindow}`, x - half, cy + 7);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#dad5ce';
+        ctx.fillText('0 ms', x, cy + 7);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#ff9298';
+        ctx.fillText(`+${CONFIG.greatWindow}`, x + half, cy + 7);
+        ctx.restore();
+    }
+
+    _drawTimingCues(cx, cy, halfText, time) {
+        const ctx = this.ctx;
+        const s = this._hudScale;
+        ctx.save();
+        for (const side of ['early', 'late']) {
+            const age = time - gameState.timingCueAt[side];
+            if (age < 0 || age >= 350) continue;
+            const sign = side === 'early' ? -1 : 1;
+            const travel = this._motionEnabled ? Math.min(age / 100, 1) * 5 : 0;
+            const x = cx + sign * (halfText + (14 + travel) * s);
+            ctx.globalAlpha = this._motionEnabled ? Math.min(1, (350 - age) / 135) : 1;
+            ctx.strokeStyle = sign < 0 ? '#83caff' : '#ff9298';
+            ctx.lineWidth = 2.5 * s;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x - sign * 3 * s, cy - 5 * s);
+            ctx.lineTo(x + sign * 3 * s, cy);
+            ctx.lineTo(x - sign * 3 * s, cy + 5 * s);
+            ctx.stroke();
+        }
+        ctx.restore();
     }
 
     /** 按可用宽度截断文本并追加省略号 */
@@ -1818,97 +1850,103 @@ class Renderer {
     }
 
     // ========== 图表 ==========
-    drawLineChart(historyData) {
-        const chartCanvas = document.getElementById('lineChartCanvas');
-        if (!chartCanvas) return;
-        const cCtx = chartCanvas.getContext('2d');
-        const container = chartCanvas.parentElement;
+    drawLineChart(historyData, options) {
+        this.drawPerformanceChart(document.getElementById('lineChartCanvas'), historyData, options);
+    }
+
+    /** 区间柱看局部失误，金色线看累计准确率；动效只负责从左到右揭示数据。 */
+    drawPerformanceChart(canvas, historyData = [], { animate = true } = {}) {
+        const container = canvas?.parentElement;
         if (!container) return;
+        cancelAnimationFrame(canvas._performanceFrame);
         const w = Math.max(1, container.clientWidth);
         const h = Math.max(1, container.clientHeight);
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        chartCanvas.width = Math.round(w * dpr);
-        chartCanvas.height = Math.round(h * dpr);
-        chartCanvas.style.width = w + 'px';
-        chartCanvas.style.height = h + 'px';
-        cCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        cCtx.clearRect(0, 0, w, h);
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        const ctx = canvas.getContext('2d');
+        const data = historyData.filter(d => Number.isFinite(Number(d.totalAcc)));
+        const compact = h < 120;
+        const box = { left: compact ? 34 : 44, top: compact ? 30 : 42, right: 10, bottom: compact ? 17 : 22 };
+        const chartW = Math.max(1, w - box.left - box.right);
+        const chartH = Math.max(1, h - box.top - box.bottom);
+        const values = data.flatMap(d => [Number(d.totalAcc), d.notes === 0 ? null : Number(d.intervalAcc)])
+            .filter(Number.isFinite);
+        const yMin = values.length ? Math.max(0, Math.floor((Math.min(...values) - 4) / 5) * 5) : 0;
+        const yMax = 100;
+        const y = value => box.top + chartH * (1 - (value - yMin) / Math.max(1, yMax - yMin));
+        const x = i => box.left + (data.length > 1 ? i * chartW / (data.length - 1) : chartW / 2);
+        const final = data.at(-1)?.totalAcc ?? 0;
+        const low = data.reduce((min, d) => Math.min(min, Number(d.totalAcc)), 100);
+        const motion = animate && this._motionEnabled && data.length > 1;
+        const start = performance.now();
 
-        if (historyData.length === 0) return;
-        // 矮窗口下图表容器只有 ~70px，边距按容器高度自适应，避免内容溢出
-        const compact = h < 100;
-        const leftMargin = compact ? 34 : 40;
-        const topMargin = compact ? 8 : 20;
-        const bottomMargin = compact ? 10 : 20;
-        const rightMargin = 10;
-        const chartW = w - leftMargin - rightMargin;
-        const chartH = h - topMargin - bottomMargin;
-
-        cCtx.fillStyle = 'rgba(255,255,255,0.05)';
-        cCtx.fillRect(0, 0, w, h);
-
-        let minAcc = 100, maxAcc = 0;
-        for (let i = 0; i < historyData.length; i++) {
-            const d = historyData[i];
-            if (d.totalAcc < minAcc) minAcc = d.totalAcc;
-            if (d.totalAcc > maxAcc) maxAcc = d.totalAcc;
-        }
-
-        if (minAcc === maxAcc) {
-            minAcc = Math.max(0, minAcc - 10);
-            maxAcc = Math.min(100, maxAcc + 10);
-        }
-
-        const range = maxAcc - minAcc;
-        const padding = range * 0.1;
-        const yMin = Math.max(0, minAcc - padding);
-        const yMax = Math.min(100, maxAcc + padding);
-        const yRange = yMax - yMin;
-
-        cCtx.fillStyle = 'rgba(255,255,255,0.5)';
-        cCtx.font = compact ? '8px sans-serif' : '10px sans-serif';
-        cCtx.textAlign = 'right';
-
-        const yTicks = this._generateYTicks(yMin, yMax);
-        // 矮容器时减少刻度数量，避免标签互相重叠
-        const tickStride = compact ? 2 : 1;
-        for (let i = 0; i < yTicks.length; i += tickStride) {
-            const yPos = topMargin + chartH - (chartH * (yTicks[i] - yMin) / yRange);
-            cCtx.fillText(yTicks[i].toFixed(0) + '%', leftMargin - 4, yPos + (compact ? 3 : 4));
-        }
-
-        cCtx.strokeStyle = 'rgba(255,255,255,0.1)';
-        cCtx.lineWidth = 1;
-        for (let i = 0; i < yTicks.length; i++) {
-            const yPos = topMargin + chartH - (chartH * (yTicks[i] - yMin) / yRange);
-            cCtx.beginPath();
-            cCtx.moveTo(leftMargin, yPos);
-            cCtx.lineTo(leftMargin + chartW, yPos);
-            cCtx.stroke();
-        }
-
-        const pointSpacing = historyData.length > 1 ? chartW / (historyData.length - 1) : 0;
-        cCtx.strokeStyle = '#4dabf7';
-        cCtx.lineWidth = 2;
-        cCtx.beginPath();
-        for (let i = 0; i < historyData.length; i++) {
-            const x = leftMargin + i * pointSpacing;
-            const normAcc = (historyData[i].totalAcc - yMin) / yRange;
-            const y = topMargin + chartH - (chartH * normAcc);
-            if (i === 0) cCtx.moveTo(x, y);
-            else cCtx.lineTo(x, y);
-        }
-        cCtx.stroke();
-
-        cCtx.fillStyle = '#4dabf7';
-        for (let i = 0; i < historyData.length; i++) {
-            const x = leftMargin + i * pointSpacing;
-            const normAcc = (historyData[i].totalAcc - yMin) / yRange;
-            const y = topMargin + chartH - (chartH * normAcc);
-            cCtx.beginPath();
-            cCtx.arc(x, y, 3, 0, Math.PI * 2);
-            cCtx.fill();
-        }
+        const draw = now => {
+            const t = motion ? Math.min(1, (now - start) / 720) : 1;
+            const p = 1 - Math.pow(1 - t, 3);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#11171e';
+            ctx.fillRect(0, 0, w, h);
+            ctx.font = `700 ${compact ? 9 : 10}px ${HUD_MONO_STACK}`;
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'right';
+            for (const tick of this._generateYTicks(yMin, yMax)) {
+                const ty = y(tick);
+                ctx.fillStyle = tick === 100 ? '#f4cf7b' : '#7e8b96';
+                ctx.fillText(`${Math.round(tick)}`, box.left - 7, ty);
+                ctx.fillStyle = tick === 100 ? '#4d4637' : '#25303a';
+                ctx.fillRect(box.left, Math.round(ty), chartW, 1);
+            }
+            if (!data.length) {
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#8f9aa4';
+                ctx.fillText('NO TIMELINE DATA', w / 2, box.top + chartH / 2);
+                return;
+            }
+            const reveal = box.left + chartW * p;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, reveal + 1, h);
+            ctx.clip();
+            const barW = Math.max(2, Math.min(9, chartW / Math.max(1, data.length) * .48));
+            data.forEach((d, i) => {
+                if (d.notes === 0) return;
+                const value = Number(d.intervalAcc) || 0;
+                const top = y(value);
+                ctx.fillStyle = value >= 92 ? '#665c43' : value >= 80 ? '#365d68' : '#764348';
+                ctx.fillRect(Math.round(x(i) - barW / 2), top, barW, box.top + chartH - top);
+            });
+            ctx.strokeStyle = '#f4cf7b';
+            ctx.lineWidth = compact ? 2 : 2.5;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            data.forEach((d, i) => i ? ctx.lineTo(x(i), y(d.totalAcc)) : ctx.moveTo(x(i), y(d.totalAcc)));
+            ctx.stroke();
+            ctx.restore();
+            const headIndex = Math.min(data.length - 1, Math.floor(p * (data.length - 1)));
+            ctx.fillStyle = '#f4eddf';
+            ctx.fillRect(Math.round(x(headIndex) - 2), Math.round(y(data[headIndex].totalAcc) - 2), 4, 4);
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.font = `800 ${compact ? 10 : 11}px ${HUD_MONO_STACK}`;
+            ctx.fillStyle = '#f4eddf';
+            ctx.fillText(`FINAL ${Number(final).toFixed(2)}%`, box.left, compact ? 9 : 13);
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#9ba7b1';
+            ctx.fillText(`LOW ${low.toFixed(2)}%`, w - box.right, compact ? 9 : 13);
+            ctx.textBaseline = 'alphabetic';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#7e8b96';
+            ctx.font = `600 ${compact ? 8 : 9}px ${HUD_MONO_STACK}`;
+            ctx.fillText('0s', box.left, h - 5);
+            ctx.textAlign = 'right';
+            ctx.fillText(`${Math.round((data.at(-1).time || 0) / 1000)}s`, w - box.right, h - 5);
+            if (t < 1) canvas._performanceFrame = requestAnimationFrame(draw);
+        };
+        draw(start);
     }
 
     _generateYTicks(min, max) {

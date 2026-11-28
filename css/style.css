@@ -439,6 +439,77 @@ select:focus-visible {
 .song-list-wrapper::-webkit-scrollbar-track { background: transparent; }
 .song-list-wrapper::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
 
+/* 曲库排序栏：一个分类下拉 + 一个方向开关，保持一行不抢列表高度 */
+.song-sort-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.sort-label {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.sort-select {
+    flex: 1;
+    min-width: 0;
+    min-height: 30px;
+    padding: 4px 26px 4px 9px;
+    font-family: var(--font-family);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--text-primary);
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%23ffffff80' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+}
+
+.sort-select:hover { border-color: var(--border-medium); }
+
+.sort-select option {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.sort-dir {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 30px;
+    padding: 4px 9px;
+    font-family: var(--font-family);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.sort-dir:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+.sort-dir .sort-dir-icon { font-size: 0.8rem; line-height: 1; }
+
+html.is-touch .sort-select { min-height: 40px; }
+html.is-touch .sort-dir { min-height: 40px; min-width: 58px; }
+
 /* 歌曲卡片 */
 .song-card {
     display: flex;
@@ -741,6 +812,10 @@ select:focus-visible {
 .settings-card {
     width: var(--settings-w);
     max-width: 92vw;
+    /* 新增打击音/流速两组后内容更高：保证小窗口也能滚到底，顶部不被裁切 */
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     background: var(--bg-surface);
     border: 1px solid var(--border-medium);
     border-radius: var(--radius-lg);
@@ -752,12 +827,17 @@ select:focus-visible {
     animation: fadeScale 0.3s ease;
 }
 
-/* 设置项容器：竖屏单列；横屏变成多列网格（见横屏媒体查询） */
+/* 设置项容器：竖屏单列；横屏变成多列网格（见横屏媒体查询）。
+   内容变高后在卡片内部滚动，把底部操作条固定住。 */
 .settings-body {
     display: flex;
     flex-direction: column;
     gap: 20px;
     min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-right: 2px;
 }
 
 @keyframes fadeScale {
@@ -1018,6 +1098,9 @@ select:focus-visible {
     text-align: center;
 }
 
+/* 流速滑条旁的数值（与 speed-value 同一视觉语言，带 x 后缀） */
+.speed-slider-control .volume-value { color: var(--accent); }
+
 /* 音量 */
 .volume-control {
     display: flex;
@@ -1058,10 +1141,42 @@ select:focus-visible {
     text-align: right;
 }
 
+/* 流速：滑条负责精细调整，± 按钮保留单步/长按连发 */
+.speed-slider-control { margin-bottom: 2px; }
+
+.speed-slider-control .volume-value {
+    min-width: 52px;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.speed-hint {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    font: 600 0.56rem/1.3 var(--font-mono);
+    letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hit-sound-preview {
+    align-self: flex-start;
+    min-height: 30px;
+    padding: 4px 12px;
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+}
+
+.hit-sound-preview:active { transform: scale(0.98); }
+
 .settings-actions {
     display: flex;
     gap: 10px;
     margin-top: 4px;
+    flex: 0 0 auto;
 }
 
 .settings-hint {
@@ -1087,6 +1202,19 @@ html.is-touch .touch-offset-hint {
 @media (max-width: 768px) and (orientation: portrait) {
     html.is-touch .btn {
         min-height: 44px;
+    }
+
+    /* 窄屏曲目计数另起一行，避免被标题与标签挤出面板 */
+    html.is-touch .song-panel-header {
+        flex-wrap: wrap;
+        row-gap: 6px;
+    }
+
+    html.is-touch .panel-count {
+        order: 3;
+        width: 100%;
+        text-align: right;
+        font-size: 0.62rem;
     }
 
     /* 标签页切换按钮 */
@@ -1501,6 +1629,102 @@ html.is-pointer-fine #touchFeedbackGroup {
 .stat-box.perfect .stat-value { color: var(--warning); }
 .stat-box.great .stat-value { color: var(--success); }
 .stat-box.miss .stat-value { color: var(--danger); }
+
+/* Early / Late 分叉条：中心零线，蓝色向左、红色向右，长度按双方占比 */
+.timing-split {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.timing-side {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.timing-side b {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.timing-side.early b,
+.timing-side.early .timing-arrow { color: #83caff; }
+.timing-side.late b,
+.timing-side.late .timing-arrow { color: #ff9298; }
+
+.timing-arrow { font-style: normal; font-size: 0.62rem; line-height: 1; }
+
+.timing-track {
+    position: relative;
+    display: block;
+    min-width: 56px;
+    height: 7px;
+    background: #171f28;
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+/* 零线：让左右偏移共用一根时间轴 */
+.timing-track::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.42);
+    z-index: 2;
+}
+
+.timing-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: var(--fill, 0%);
+}
+
+.timing-fill.early { right: 50%; background: #83caff; transform-origin: right center; }
+.timing-fill.late  { left: 50%;  background: #ff9298; transform-origin: left center; }
+
+/* 旧记录没有早/晚数据：用占位条代替分叉条，避免误读成 0:0 */
+.timing-unknown {
+    display: grid;
+    place-items: center;
+    min-width: 56px;
+    min-height: 16px;
+    padding: 1px 6px;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.02);
+    color: rgba(255, 255, 255, 0.42);
+    font: 600 0.5rem/1.2 var(--font-mono);
+    font-style: normal;
+    letter-spacing: 0.1em;
+    text-align: center;
+}
+
+@keyframes timingSpread {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+}
+
+#resultScreen .result-card.enter-anim .timing-fill {
+    animation: timingSpread 0.55s cubic-bezier(0.2, 0.9, 0.25, 1) 0.52s both;
+}
 
 /* 性能曲线图 */
 .chart-box {
@@ -2861,10 +3085,31 @@ html.is-touch .pause-hint {
 }
 
 /* ============================================================
-   手机横屏 / 矮窗口（landscape 且高度 ≤ 520px）
-   覆盖 844×390 / 926×428 等横屏手机 —— 它们宽度 > 768px，
-   不能依赖 max-width 断点，必须用高度判断
+   桌面 / 平板宽屏：全局设置两列，避免新增滑条把卡片撑出屏幕
    ============================================================ */
+@media (min-width: 769px) and (min-height: 521px) {
+    #settingsScreen[data-mode="global"] .settings-card {
+        width: min(92vw, 760px);
+        max-width: none;
+        max-height: calc(100dvh - 40px);
+    }
+
+    #settingsScreen[data-mode="global"] .settings-body {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px 24px;
+        align-content: start;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-right: 4px;
+    }
+
+    /* 校准面板内容较多，横跨两列保持一致的对齐 */
+    #settingsScreen[data-mode="global"] #calibrationGroup {
+        grid-column: 1 / -1;
+    }
+}
+
 @media (orientation: landscape) and (max-height: 520px) {
     html { font-size: 14px; }
 
@@ -2936,7 +3181,6 @@ html.is-touch .pause-hint {
         min-height: 0;
         padding-right: 2px;
     }
-
     .settings-group { gap: 4px; margin: 0; }
     .settings-label { font-size: 0.6rem; }
 
@@ -2952,6 +3196,9 @@ html.is-touch .pause-hint {
     .speed-control { gap: 8px; }
     .speed-btn { width: 32px; height: 32px; font-size: 1rem; }
     .speed-value { font-size: 0.9rem; min-width: 40px; }
+    .speed-hint { display: none; }
+    .speed-slider-control .volume-value { min-width: 44px; }
+    .hit-sound-preview { min-height: 30px; padding: 4px 10px; font-size: 0.6rem; align-self: stretch; }
 
     .volume-control { gap: 8px; }
     .volume-slider { height: 5px; }
@@ -3515,9 +3762,26 @@ html.is-pointer-fine body.game-active:not(.paused) {
 @media (orientation: landscape) and (max-height: 520px) {
     #settingsScreen[data-mode="global"] .settings-body { align-content: start; overflow-x: hidden; }
     #settingsScreen[data-mode="song"] #chartDifficultyGroup { grid-column: span 2; }
+
+    /* 横屏全局设置：四列网格，把最常调的滑条留在第一屏，
+       外观类与校准依次下移，整体仍可在设置区内滚动。 */
+    #settingsScreen[data-mode="global"] .settings-body {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px 12px;
+    }
+    #settingsScreen[data-mode="global"] #speedGroup { grid-column: 1 / span 2; grid-row: 1; }
+    #settingsScreen[data-mode="global"] #volumeGroup { grid-column: 3; grid-row: 1; }
+    #settingsScreen[data-mode="global"] #hitSoundGroup { grid-column: 4; grid-row: 1; }
+    #settingsScreen[data-mode="global"] #offsetGroup { grid-column: 1 / span 3; grid-row: 2; }
+    #settingsScreen[data-mode="global"] #touchFeedbackGroup { grid-column: 4; grid-row: 2; }
+    #settingsScreen[data-mode="global"] #noteStyleGroup { grid-column: 1 / span 2; grid-row: 3; }
+    #settingsScreen[data-mode="global"] #skinGroup { grid-column: 3 / span 2; grid-row: 3; }
+    #settingsScreen[data-mode="global"] #hitSoundGroup { align-content: start; }
+    #settingsScreen[data-mode="global"] #hitSoundGroup .hit-sound-preview { align-self: start; }
+
     #settingsScreen[data-mode="global"] #calibrationGroup {
-        order: -1;
         grid-column: 1 / -1;
+        grid-row: 4;
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         grid-template-rows: auto auto auto;
@@ -3540,6 +3804,26 @@ html.is-pointer-fine body.game-active:not(.paused) {
     #settingsScreen[data-mode="global"] #calibrationGroup .calibration-actions .btn {
         flex: 1 1 0; min-height: 34px; padding: 5px 8px; font-size: 0.6rem; white-space: nowrap;
     }
+    /* 横屏矮窗口：压缩设置卡片的纵向内边距，让校准面板也进首屏 */
+    #settingsScreen[data-mode="global"] .settings-card { padding: 8px 12px; gap: 6px; }
+    #settingsScreen[data-mode="global"] .settings-header h2 { font-size: 0.9rem; }
+    #settingsScreen[data-mode="global"] .settings-actions { margin-top: 0; }
+    #settingsScreen[data-mode="global"] .settings-actions .btn { min-height: 34px; padding: 5px 10px; }
     .song-chart-card { padding: 6px 10px; }
     .song-chart-meta { font-size: 0.56rem; }
+}
+
+/* 窄横屏（≲620px）：四列会把滑条压到放不下数值，改为两列 */
+@media (orientation: landscape) and (max-height: 520px) and (max-width: 620px) {
+    #settingsScreen[data-mode="global"] .settings-body {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    #settingsScreen[data-mode="global"] #speedGroup { grid-column: 1 / -1; grid-row: 1; }
+    #settingsScreen[data-mode="global"] #volumeGroup { grid-column: 1; grid-row: 2; }
+    #settingsScreen[data-mode="global"] #hitSoundGroup { grid-column: 2; grid-row: 2; }
+    #settingsScreen[data-mode="global"] #offsetGroup { grid-column: 1 / -1; grid-row: 3; }
+    #settingsScreen[data-mode="global"] #touchFeedbackGroup { grid-column: 1 / -1; grid-row: 4; }
+    #settingsScreen[data-mode="global"] #noteStyleGroup { grid-column: 1 / -1; grid-row: 5; }
+    #settingsScreen[data-mode="global"] #skinGroup { grid-column: 1 / -1; grid-row: 6; }
+    #settingsScreen[data-mode="global"] #calibrationGroup { grid-column: 1 / -1; grid-row: 7; }
 }

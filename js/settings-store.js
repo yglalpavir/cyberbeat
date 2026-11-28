@@ -6,11 +6,14 @@ const SETTINGS_KEY = 'cyberbeat_settings';
 const DEFAULT_SETTINGS = {
     noteSpeed: 16.0,
     volume: 4,
+    hitSoundVolume: 100,    // 打击音效音量百分比（0-300）
     noteStyle: 'bar',
     skin: 'builtin',        // 'builtin' | 'malody'
     difficulty: 'normal+',
     audioOffset: 0,
-    touchFeedback: true
+    touchFeedback: true,
+    songSort: 'default',
+    songOrder: 'asc'
 };
 
 class SettingsStore {
@@ -98,6 +101,9 @@ class SettingsStore {
         if (s.volume !== undefined) {
             currentVolume = s.volume;
         }
+        if (s.hitSoundVolume !== undefined) {
+            hitSoundVolume = this._clampHitSoundVolume(s.hitSoundVolume);
+        }
         if (s.noteStyle !== undefined) {
             noteStyle = s.noteStyle;
         }
@@ -124,11 +130,20 @@ class SettingsStore {
         this.save({
             noteSpeed: noteSpeed,
             volume: currentVolume,
+            hitSoundVolume: typeof hitSoundVolume !== 'undefined'
+                ? this._clampHitSoundVolume(hitSoundVolume) : 100,
             noteStyle: noteStyle,
             skin: typeof skinMode !== 'undefined' ? skinMode : 'builtin',
             audioOffset: typeof audioOffsetMs !== 'undefined' ? audioOffsetMs : 0,
             touchFeedback: typeof touchFeedbackEnabled !== 'undefined' ? touchFeedbackEnabled : true
         });
+    }
+
+    /** 打击音效音量只接受 0-300 的整数百分比，非法值回落到 100。 */
+    _clampHitSoundVolume(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return 100;
+        return Math.max(0, Math.min(300, Math.round(num)));
     }
 }
 

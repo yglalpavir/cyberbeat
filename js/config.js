@@ -128,14 +128,18 @@ document.documentElement.classList.toggle('is-touch', IS_TOUCH_DEVICE);
 document.documentElement.classList.toggle('is-pointer-fine', !IS_TOUCH_DEVICE);
 
 // ==================== 速度设置 ====================
+// 流速覆盖很慢到很快的可玩区间，步进 0.1 便于逐格微调。
+const MIN_SPEED = 1.0;
+const MAX_SPEED = 30.0;
+const SPEED_STEP = 0.1;
+const DEFAULT_SPEED = 16.0;
 
-const MIN_SPEED = 6.0;
-const MAX_SPEED = 21.0;
-const SPEED_STEP = 0.5;
-
-let noteSpeed = 16.0;
+let noteSpeed = DEFAULT_SPEED;
 let selectedDifficulty = 'normal+';
 let noteStyle = 'bar';   // 'bar'（扁平条）| 'pixel'（像素块）
+
+// 打击音效音量（百分比，0-300）：100 为基准，可放大到 3 倍用于嘈杂环境
+let hitSoundVolume = 100;
 
 // 触控点显示开关（移动端游戏内显示手指触控圆环，设置页可切换）
 let touchFeedbackEnabled = true;

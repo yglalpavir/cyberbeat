@@ -56,6 +56,13 @@ class LeaderboardManager {
         }
     }
 
+    /** 旧记录没有 Early/Late 数据：保留 null，与真实 0 次区分。 */
+    _timingCount(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const count = Number(value);
+        return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
+    }
+
     /** 生成歌曲唯一标识 */
     _getSongId(songDisplayName) {
         // 使用歌曲显示名称作为 key
@@ -88,6 +95,8 @@ class LeaderboardManager {
             perfect: record.perfect || 0,
             great: record.great || 0,
             miss: record.miss || 0,
+            early: this._timingCount(record.early),
+            late: this._timingCount(record.late),
             rank: record.rank || 'C',
             difficulty: record.difficulty || 'normal+',
             speed: record.speed || 16.0,
@@ -129,6 +138,14 @@ class LeaderboardManager {
                 break;
         }
         return sorted;
+    }
+
+    /** 所有记录的扁平副本，供曲库按谱面/曲目统计游玩次数。 */
+    getAllRecords() {
+        return Object.values(this._loadAll())
+            .filter(Array.isArray)
+            .flat()
+            .filter(record => record && typeof record === 'object');
     }
 
     /**
@@ -294,6 +311,8 @@ class LeaderboardManager {
                         perfect: entry.perfect || 0,
                         great: entry.great || 0,
                         miss: entry.miss || 0,
+                        early: this._timingCount(entry.early),
+                        late: this._timingCount(entry.late),
                         rank: entry.rank || 'C',
                         difficulty: entry.difficulty || 'normal+',
                         speed: entry.speed || 16.0,

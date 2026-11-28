@@ -13,8 +13,8 @@
     <title>CyberBeat Pixel</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="apple-touch-icon" href="favicon.svg">
-    <link rel="stylesheet" href="css/style.css?v=song-settings-1">
-    <link rel="stylesheet" href="css/arcade.css?v=4">
+    <link rel="stylesheet" href="css/style.css?v=grid-speed-hitsound-2">
+    <link rel="stylesheet" href="css/arcade.css?v=grid-speed-hitsound-2">
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
@@ -123,7 +123,22 @@
                         </div>
                         <span class="panel-count" id="songCount">0 TRACKS</span>
                     </div>
-                    
+
+                    <div class="song-sort-bar">
+                        <label class="sort-label" for="songSortSelect">SORT</label>
+                        <select class="sort-select" id="songSortSelect">
+                            <option value="default">DEFAULT ORDER</option>
+                            <option value="title">TITLE A–Z</option>
+                            <option value="recent">RECENT PLAYED</option>
+                            <option value="plays">MOST PLAYED</option>
+                        </select>
+                        <button type="button" class="sort-dir" id="songSortDir" aria-label="Ascending order" title="Ascending order" data-order="asc">
+                            <span class="sort-dir-icon" aria-hidden="true">↑</span>
+                            <span class="sort-dir-text">ASC</span>
+                        </button>
+                        <span class="sr-only" id="songSortStatus" role="status" aria-live="polite"></span>
+                    </div>
+
                     <div class="song-list-wrapper" id="songListWrapper">
                         <!-- MIDI Tab Content -->
                         <div class="tab-content active" id="tabContentMidi">
@@ -231,7 +246,7 @@
                         </div>
                     </div>
 
-                    <div class="settings-group global-setting-group">
+                    <div class="settings-group global-setting-group" id="noteStyleGroup">
                         <label class="settings-label">NOTE STYLE</label>
                         <div class="style-selector">
                             <button class="style-btn active" data-style="bar">
@@ -245,7 +260,7 @@
                         </div>
                     </div>
 
-                    <div class="settings-group global-setting-group">
+                    <div class="settings-group global-setting-group" id="skinGroup">
                         <label class="settings-label">SKIN</label>
                         <div class="style-selector">
                             <button class="skin-btn active" data-skin="builtin" type="button">
@@ -260,16 +275,21 @@
                         <div class="settings-hint" id="skinHint">MALODY V：Yuxen 4K 皮肤（assets/skins/yuxen，判定线高度由 HITPOSITION 控制）</div>
                     </div>
 
-                    <div class="settings-group global-setting-group">
+                    <div class="settings-group global-setting-group" id="speedGroup">
                         <label class="settings-label">SPEED</label>
+                        <div class="volume-control speed-slider-control">
+                            <input type="range" id="speedSlider" min="1" max="30" step="0.1" value="16" class="volume-slider"
+                                aria-label="Note scroll speed" aria-valuetext="16.0x">
+                            <span class="volume-value" id="speedValue">16.0x</span>
+                        </div>
                         <div class="speed-control">
-                            <button class="speed-btn" id="speedDown">−</button>
-                            <span class="speed-value" id="speedValue">16.0</span>
-                            <button class="speed-btn" id="speedUp">+</button>
+                            <button class="speed-btn" id="speedDown" type="button" aria-label="Slower">−</button>
+                            <span class="speed-hint">0.1 STEP · LONG PRESS TO REPEAT</span>
+                            <button class="speed-btn" id="speedUp" type="button" aria-label="Faster">+</button>
                         </div>
                     </div>
 
-                    <div class="settings-group global-setting-group">
+                    <div class="settings-group global-setting-group" id="volumeGroup">
                         <label class="settings-label">VOLUME</label>
                         <div class="volume-control">
                             <input type="range" id="volumeSlider" min="0" max="10" value="4" class="volume-slider">
@@ -277,7 +297,18 @@
                         </div>
                     </div>
 
-                    <div class="settings-group global-setting-group">
+                    <div class="settings-group global-setting-group" id="hitSoundGroup">
+                        <label class="settings-label">HIT SOUND</label>
+                        <div class="volume-control">
+                            <input type="range" id="hitSoundSlider" min="0" max="300" step="5" value="100" class="volume-slider"
+                                aria-label="Hit sound volume" aria-valuetext="100%">
+                            <span class="volume-value" id="hitSoundValue">100%</span>
+                        </div>
+                        <button class="btn btn-secondary hit-sound-preview" id="hitSoundPreview" type="button">▶ TEST HIT SOUND</button>
+                        <div class="settings-hint">只影响打击音效，不改动伴奏音量；0% 静音、300% 适合嘈杂环境</div>
+                    </div>
+
+                    <div class="settings-group global-setting-group" id="offsetGroup">
                         <label class="settings-label">GLOBAL OFFSET</label>
                         <div class="volume-control">
                             <input type="range" id="offsetSlider" min="-200" max="200" step="5" value="0" class="volume-slider">
@@ -372,6 +403,7 @@
                         <span class="stat-label">MISS</span>
                         <span class="stat-value" id="finalMiss">0</span>
                     </div>
+                    <div class="timing-split" id="resultTiming" role="group" aria-label="Early and late hit counts"></div>
                 </div>
                 
                 <!-- 性能曲线图 -->
@@ -474,20 +506,20 @@
     </div>
 
     <script src="js/perf-monitor.js"></script>
-    <script src="js/config.js"></script>
-    <script src="js/settings-store.js?v=2"></script>
+    <script src="js/config.js?v=grid-speed-hitsound-1"></script>
+    <script src="js/settings-store.js?v=grid-speed-hitsound-1"></script>
     <script src="js/skin.js"></script>
-    <script src="js/leaderboard.js?v=chart-id-1"></script>
-    <script src="js/game-state.js?v=audio-clock-1"></script>
-    <script src="js/audio-engine.js?v=hit-click-1"></script>
+    <script src="js/leaderboard.js?v=timing-sort-3"></script>
+    <script src="js/game-state.js?v=timing-sort-3"></script>
+    <script src="js/audio-engine.js?v=grid-speed-hitsound-1"></script>
     <script src="js/midi-parser.js"></script>
     <script src="js/mc-parser.js"></script>
     <script src="js/osu-parser.js"></script>
     <script src="js/osu-zip.js"></script>
     <script src="js/difficulty.js"></script>
     <script src="js/note-generator.js"></script>
-    <script src="js/renderer.js?v=hold-readability-3"></script>
-    <script src="js/ui.js?v=arcade-ui-3"></script>
+    <script src="js/renderer.js?v=grid-speed-hitsound-1"></script>
+    <script src="js/ui.js?v=grid-speed-hitsound-2"></script>
     <script src="js/main.js?v=motion-1"></script>
 </body>
 </html>

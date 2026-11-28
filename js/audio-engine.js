@@ -223,7 +223,13 @@ class AudioEngine {
     _hitLevel(type, cfg) {
         const base = Number.isFinite(cfg.gain) ? cfg.gain : 0.24;
         const scale = type === 'miss' ? cfg.missGainScale : (type === 'holdEnd' ? cfg.holdEndGainScale : 1);
-        return Math.max(0, Math.min(1, base * (Number.isFinite(scale) ? scale : (type === 'miss' ? 0.75 : 0.85))));
+        const level = base * (Number.isFinite(scale) ? scale : (type === 'miss' ? 0.75 : 0.85));
+        // 玩家可在全局设置把打击音放大到 300%：gain 允许超过 1，
+        // 由 limiter + masterGain 兜住削波风险。
+        const boost = typeof hitSoundVolume === 'number' && Number.isFinite(hitSoundVolume)
+            ? Math.max(0, Math.min(300, hitSoundVolume)) / 100
+            : 1;
+        return Math.max(0, level * boost);
     }
 
     /** 按采样参数签名懒生成并缓存；兼容 getHitSoundConfig 每次创建新 fallback 对象。 */

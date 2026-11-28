@@ -23,6 +23,12 @@ class UIManager {
         // 音频延迟校准运行时状态
         this._calibration = null;
 
+        // 曲库排序（持久化）：默认曲库顺序；recent / plays 使用本地记录
+        const sortModes = ['default', 'title', 'recent', 'plays'];
+        const savedSort = settingsStore.get('songSort');
+        this._songSort = sortModes.includes(savedSort) ? savedSort : 'default';
+        this._songOrder = settingsStore.get('songOrder') === 'desc' ? 'desc' : 'asc';
+
         // 排行榜返回来源
         this._lbOrigin = 'start';
 
@@ -60,6 +66,7 @@ class UIManager {
         this.setVolume(currentVolume);
         if (this.volumeSlider) this.volumeSlider.value = currentVolume;
         if (this.volumeValue) this.volumeValue.textContent = currentVolume + '/10';
+        this.updateHitSoundDisplay();
 
         // 初始化全局偏移（ms）- 使用持久化的偏移值
         this.setAudioOffset(audioOffsetMs, /* updateUI */ true);
@@ -82,6 +89,11 @@ class UIManager {
         this.songEmptyMidi  = document.getElementById('songEmptyMidi');
         this.songEmptySongs = document.getElementById('songEmptySongs');
         this.songCount      = document.getElementById('songCount');
+
+        // 曲库排序
+        this.songSortSelect = document.getElementById('songSortSelect');
+        this.songSortDir    = document.getElementById('songSortDir');
+        this.songSortStatus = document.getElementById('songSortStatus');
 
         // 标签页
         this.tabMidi        = document.getElementById('tabMidi');
@@ -133,6 +145,12 @@ class UIManager {
         this.volumeSlider = document.getElementById('volumeSlider');
         this.volumeValue  = document.getElementById('volumeValue');
 
+        // 打击音效音量
+        this.hitSoundSlider  = document.getElementById('hitSoundSlider');
+        this.hitSoundValue   = document.getElementById('hitSoundValue');
+        this.hitSoundPreview = document.getElementById('hitSoundPreview');
+        this.speedSlider     = document.getElementById('speedSlider');
+
         // 全局偏移
         this.offsetSlider = document.getElementById('offsetSlider');
         this.offsetValue  = document.getElementById('offsetValue');
@@ -145,6 +163,7 @@ class UIManager {
         this.finalPerfect   = document.getElementById('finalPerfect');
         this.finalGreat     = document.getElementById('finalGreat');
         this.finalMiss      = document.getElementById('finalMiss');
+        this.resultTiming   = document.getElementById('resultTiming');
         this.resultBest     = document.getElementById('resultBest');
         // 本局启动时锁定的 chart identity，避免结算前选歌/UI 状态变化混淆对比对象
         this._runChartId = null;
@@ -301,6 +320,15 @@ class UIManager {
         this.tabMidi.addEventListener('click', () => this.switchTab('midi'));
         this.tabSongs.addEventListener('click', () => this.switchTab('songs'));
 
+        // 曲库排序
+        if (this.songSortSelect) {
+            this.songSortSelect.addEventListener('change', () => this._setSongSort(this.songSortSelect.value));
+        }
+        if (this.songSortDir) {
+            this.songSortDir.addEventListener('click', () => this._setSongOrder(this._songOrder === 'asc' ? 'desc' : 'asc'));
+        }
+        this._syncSortControls();
+
         // 移动端选曲增强（仅触屏设备）：
         // 1. 双击歌曲卡片 → 直接进入设置页（省一次 START 点按）
         // 2. 滚动惯性中抑制卡片 click（防止滑动列表时误选歌）
@@ -349,12 +377,29 @@ class UIManager {
             });
         }
 
+        // 速度滑块与按钮
+        if (this.speedSlider) {
+            this.speedSlider.addEventListener('input', () => {
+                this.setNoteSpeed(parseFloat(this.speedSlider.value));
+            });
+        }
+
         // 音量滑块
         if (this.volumeSlider) {
             this.volumeSlider.addEventListener('input', () => {
                 const vol = parseInt(this.volumeSlider.value);
                 this.setVolume(vol);
             });
+        }
+
+        // 打击音效音量滑块 + 试听
+        if (this.hitSoundSlider) {
+            this.hitSoundSlider.addEventListener('input', () => {
+                this.setHitSoundVolume(parseInt(this.hitSoundSlider.value));
+            });
+        }
+        if (this.hitSoundPreview) {
+            this.hitSoundPreview.addEventListener('click', () => this.previewHitSound());
         }
 
         // 全局偏移滑块
@@ -420,6 +465,22 @@ class UIManager {
 
         // 禁止右键菜单
         document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // 旋转 / 改窗口后重绘可见的结算与记录图表，避免画布停在旧尺寸
+        let chartResizeTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(chartResizeTimer);
+            chartResizeTimer = setTimeout(() => this._redrawVisibleCharts(), 150);
+        });
+    }
+
+    _redrawVisibleCharts() {
+        if (this.resultScreen && !this.resultScreen.classList.contains('hidden')) {
+            renderer?.drawLineChart(gameState.performanceHistory, { animate: false });
+        }
+        if (this.lbDetail && this.lbDetail.style.display !== 'none' && this.lbChartCanvas) {
+            renderer?.drawPerformanceChart(this.lbChartCanvas, this._detailHistory || [], { animate: false });
+        }
     }
 
     // ========== 音频解锁 ==========
@@ -673,7 +734,9 @@ class UIManager {
     }
 
     /**
-     * 把 SONGS 谱面按歌曲合并为谱面组，保留 menu.json 的顺序。
+     * 把 SONGS 谱面按歌曲合并为谱面组。
+     * 组内始终按等级从低到高排序（等级相同再按难度名），
+     * 这样卡片上的等级区间、谱面芯片顺序和歌曲设置里的切换器一致。
      * @param {Array} [songs] 默认全部谱面歌曲
      * @returns {Array<{key:string,title:string,artist:string,charts:Array<{song:object,index:number}>}>}
      */
@@ -688,13 +751,177 @@ class UIManager {
             }
             group.charts.push({ song, index: songLibrary.indexOf(song) });
         });
-        return Array.from(map.values());
+        for (const group of map.values()) {
+            group.charts.sort((a, b) => this._compareChartDifficulty(a, b));
+        }
+
+        // 合并后的组沿用「首张谱面」在曲库中的位置，DEFAULT ORDER 才能保持稳定
+        return Array.from(map.values()).sort((a, b) => a.charts[0].index - b.charts[0].index);
+    }
+
+    /**
+     * 谱面排序规则：等级升序 → 难度名（自然序）→ 曲库原始顺序。
+     * 等级缺失的谱面排在最后，不参与前两级比较。
+     */
+    _compareChartDifficulty(a, b) {
+        const lvA = parseInt(a.song?.level);
+        const lvB = parseInt(b.song?.level);
+        const hasA = Number.isFinite(lvA);
+        const hasB = Number.isFinite(lvB);
+        if (hasA && hasB && lvA !== lvB) return lvA - lvB;
+        if (hasA !== hasB) return hasA ? -1 : 1;
+        return this._compareSongTitle(a.song?.difficultyName, b.song?.difficultyName)
+            || (a.index - b.index);
     }
 
     /** 找到某首歌所属的谱面组 */
     _songGroupOf(song) {
         if (!song) return null;
         return this._getChartGroups().find(g => g.key === this._chartGroupKey(song)) || null;
+    }
+
+    // ========== 曲库排序 ==========
+    /** 标题排序：忽略大小写和全/半角差异，数字按数值比较。 */
+    _compareSongTitle(a, b) {
+        return String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base', numeric: true });
+    }
+
+    _defaultOrderFor(mode) {
+        return mode === 'recent' || mode === 'plays' ? 'desc' : 'asc';
+    }
+
+    _setSongSort(mode) {
+        this._songSort = ['default', 'title', 'recent', 'plays'].includes(mode) ? mode : 'default';
+        // 切分类时给出该分类最自然的初始方向，之后可用按钮翻转
+        this._songOrder = this._defaultOrderFor(this._songSort);
+        settingsStore.set('songSort', this._songSort);
+        settingsStore.set('songOrder', this._songOrder);
+        this._syncSortControls();
+        this.renderSongList();
+    }
+
+    _setSongOrder(order) {
+        this._songOrder = order === 'desc' ? 'desc' : 'asc';
+        settingsStore.set('songOrder', this._songOrder);
+        this._syncSortControls();
+        this.renderSongList();
+    }
+
+    _syncSortControls() {
+        if (this.songSortSelect) this.songSortSelect.value = this._songSort;
+        if (this.songSortDir) {
+            const descending = this._songOrder === 'desc';
+            this.songSortDir.dataset.order = this._songOrder;
+            this.songSortDir.querySelector('.sort-dir-icon').textContent = descending ? '↓' : '↑';
+            this.songSortDir.querySelector('.sort-dir-text').textContent = descending ? 'DESC' : 'ASC';
+            this.songSortDir.setAttribute('aria-label', descending ? 'Descending order' : 'Ascending order');
+            this.songSortDir.title = descending ? 'Descending order' : 'Ascending order';
+        }
+        if (this.songSortStatus) {
+            const label = this.songSortSelect?.selectedOptions?.[0]?.textContent || 'default';
+            this.songSortStatus.textContent = `Sorted by ${label.toLowerCase()}, ${this._songOrder === 'desc' ? 'descending' : 'ascending'}.`;
+        }
+    }
+
+    /**
+     * 从本地记录统计「每首歌 / 每个谱面组」的游玩次数与最近时间。
+     * chartId 优先；无 chartId 的旧记录仅在曲名唯一时归并，避免串歌。
+     */
+    _collectPlayStats(resolveKey) {
+        const stats = new Map();
+        if (typeof leaderboard === 'undefined') return stats;
+        for (const record of leaderboard.getAllRecords()) {
+            const key = resolveKey(record);
+            if (!key) continue;
+            const entry = stats.get(key) || { plays: 0, last: 0 };
+            entry.plays++;
+            const at = Date.parse(record.date);
+            if (Number.isFinite(at) && at > entry.last) entry.last = at;
+            stats.set(key, entry);
+        }
+        return stats;
+    }
+
+    _playStatsForSongs(songs) {
+        const ids = new Set(songs.map(song => String(song.id)));
+        // 同名歌曲无法确定归属：记成 null，旧记录不计入任何一首
+        const titleIds = new Map();
+        for (const song of songs) {
+            titleIds.set(song.title, titleIds.has(song.title) ? null : String(song.id));
+        }
+        return this._collectPlayStats(record => {
+            const base = record.chartId ? String(record.chartId).split(':')[0] : null;
+            if (base && ids.has(base)) return base;
+            if (!record.chartId) {
+                const id = titleIds.get(record.songName);
+                if (id) return id;
+            }
+            return null;
+        });
+    }
+
+    _playStatsForGroups(groups) {
+        const groupBySongId = new Map();
+        for (const group of groups) {
+            for (const chart of group.charts) {
+                if (chart.song.id) groupBySongId.set(String(chart.song.id), group.key);
+            }
+        }
+        const groupsByTitle = new Map();
+        for (const group of groups) {
+            const keys = groupsByTitle.get(group.title) || [];
+            keys.push(group.key);
+            groupsByTitle.set(group.title, keys);
+        }
+        return this._collectPlayStats(record => {
+            const base = record.chartId ? String(record.chartId).split(':')[0] : null;
+            if (base && groupBySongId.has(base)) return groupBySongId.get(base);
+            if (!record.chartId) {
+                const keys = groupsByTitle.get(record.songName);
+                if (keys?.length === 1) return keys[0];
+            }
+            return null;
+        });
+    }
+
+    _sortedSongs(songs) {
+        const list = [...songs];
+        const direction = this._songOrder === 'desc' ? -1 : 1;
+        if (this._songSort === 'title') {
+            return list.sort((a, b) => direction * this._compareSongTitle(a.title, b.title));
+        }
+        if (this._songSort === 'recent' || this._songSort === 'plays') {
+            const stats = this._playStatsForSongs(list);
+            const valueOf = song => {
+                const entry = stats.get(String(song.id));
+                if (!entry) return -1;
+                return this._songSort === 'plays' ? entry.plays : entry.last;
+            };
+            return list.sort((a, b) => direction * (valueOf(a) - valueOf(b))
+                || this._compareSongTitle(a.title, b.title));
+        }
+        return direction === 1 ? list : list.reverse();
+    }
+
+    _sortedChartGroups(groups) {
+        const list = [...groups];
+        const direction = this._songOrder === 'desc' ? -1 : 1;
+        if (this._songSort === 'title') {
+            return list.sort((a, b) => direction * this._compareSongTitle(a.title, b.title)
+                || this._compareSongTitle(a.artist, b.artist));
+        }
+        if (this._songSort === 'recent' || this._songSort === 'plays') {
+            const stats = this._playStatsForGroups(list);
+            const valueOf = group => {
+                const entry = stats.get(group.key);
+                if (!entry) return -1;
+                return this._songSort === 'plays' ? entry.plays : entry.last;
+            };
+            return list.sort((a, b) => direction * (valueOf(a) - valueOf(b))
+                || this._compareSongTitle(a.title, b.title)
+                || this._compareSongTitle(a.artist, b.artist));
+        }
+        return direction === 1 ? list : list.reverse();
     }
 
     renderSongList() {
@@ -711,7 +938,7 @@ class UIManager {
             return;
         }
 
-        const midiSongs = this._getMidiSongs();
+        const midiSongs = this._sortedSongs(this._getMidiSongs());
         const chartSongs = this._getChartSongs();
 
         // 更新计数（显示当前活跃标签页的曲目数）
@@ -757,7 +984,7 @@ class UIManager {
         } else {
             if (this.songEmptySongs) this.songEmptySongs.style.display = 'none';
             // 同一首歌的不同难度谱面合并为一张卡片，谱面在歌曲设置里切换
-            this._getChartGroups(chartSongs).forEach((group) => {
+            this._sortedChartGroups(this._getChartGroups(chartSongs)).forEach((group) => {
                 this.songCardsSongs.appendChild(this.createSongGroupCard(group));
             });
             // 导入的 .osu / .osz 谱面：显示为合成卡片，避免切标签丢失选择
@@ -2710,6 +2937,9 @@ class UIManager {
         this.finalPerfect.textContent  = gameState.perfect;
         this.finalGreat.textContent    = gameState.great;
         this.finalMiss.textContent     = gameState.miss;
+        if (this.resultTiming) {
+            this.resultTiming.innerHTML = this._timingSplitHtml(gameState.early, gameState.late);
+        }
 
         this.resultScreen.classList.remove('hidden');
         this._enterResult();
@@ -2736,7 +2966,8 @@ class UIManager {
 
     /** 重播结算进场，关闭或查看记录不改动实际数值。 */
     _enterResult() {
-        renderer?.drawLineChart(gameState.performanceHistory);
+        // 揭示动画交给 CSS（chartFeed），避免画布 rAF 与入场裁剪叠加。
+        renderer?.drawLineChart(gameState.performanceHistory, { animate: false });
         this._enterAnim('#resultCard');
     }
 
@@ -2786,6 +3017,37 @@ class UIManager {
         }
     }
 
+    /** 旧记录没有早/晚字段：返回 null 表示未知，避免把「没记录」误显示成 0。 */
+    _timingCount(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const count = Number(value);
+        return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
+    }
+
+    /**
+     * Early / Late 分叉条：从中心零线向两侧生长，长度按双方占比分配。
+     * 蓝色靠左、红色靠右，与游玩中的 combo 侧箭头保持同一套语义。
+     */
+    _timingSplitHtml(early, late) {
+        const e = this._timingCount(early);
+        const l = this._timingCount(late);
+        const known = e !== null && l !== null;
+        const total = known ? e + l : 0;
+        const earlyShare = total ? (e / total) * 50 : 0;
+        const lateShare = total ? (l / total) * 50 : 0;
+        const middle = known
+            ? `<span class="timing-track">
+                <i class="timing-fill early" style="--fill:${earlyShare.toFixed(2)}%"></i>
+                <i class="timing-fill late" style="--fill:${lateShare.toFixed(2)}%"></i>
+            </span>`
+            : '<span class="timing-unknown">NOT RECORDED</span>';
+        return `
+            <span class="timing-side early"><i class="timing-arrow" aria-hidden="true">◀</i>EARLY <b>${known ? e : '—'}</b></span>
+            ${middle}
+            <span class="timing-side late">LATE <b>${known ? l : '—'}</b><i class="timing-arrow" aria-hidden="true">▶</i></span>
+        `;
+    }
+
     // ========== 保存记录到排行榜 ==========
     _recordChartId() {
         if (selectedSongSource === 'library' && selectedLibrarySong?.id) {
@@ -2825,6 +3087,8 @@ class UIManager {
                 perfect: gameState.perfect,
                 great: gameState.great,
                 miss: gameState.miss,
+                early: gameState.early,
+                late: gameState.late,
                 rank: isGameFailed ? 'F' : rank,
                 difficulty: this._runDifficulty,
                 speed: noteSpeed,
@@ -2927,6 +3191,12 @@ class UIManager {
             this.updateSpeedDisplay();
         }
 
+        // 应用打击音效音量
+        if (s.hitSoundVolume !== undefined) {
+            hitSoundVolume = settingsStore._clampHitSoundVolume(s.hitSoundVolume);
+            this.updateHitSoundDisplay();
+        }
+
         // 应用难度
         if (s.difficulty !== undefined) {
             selectedDifficulty = s.difficulty;
@@ -3003,6 +3273,8 @@ class UIManager {
             perfect: gameState.perfect,
             great: gameState.great,
             miss: gameState.miss,
+            early: gameState.early,
+            late: gameState.late,
             rank: rank,
             difficulty: this._runDifficulty,
             speed: noteSpeed,
@@ -3025,12 +3297,18 @@ class UIManager {
     }
 
     // ========== 设置变更 ==========
-    changeSpeed(delta) {
-        noteSpeed += delta;
-        noteSpeed = Math.round(noteSpeed * 10) / 10;
-        noteSpeed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, noteSpeed));
+    /** 设置流速：接受任意来源（滑块/按钮），统一夹取并同步三处显示 */
+    setNoteSpeed(value) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return;
+        // 步进 0.1，避免浮点尾巴（如 15.700000000000001）
+        noteSpeed = Math.round(Math.max(MIN_SPEED, Math.min(MAX_SPEED, num)) * 10) / 10;
         this.updateSpeedDisplay();
         this._syncSettingsToStore();
+    }
+
+    changeSpeed(delta) {
+        this.setNoteSpeed(noteSpeed + delta);
     }
 
     /**
@@ -3158,8 +3436,41 @@ class UIManager {
 
     updateSpeedDisplay() {
         if (this.speedValue) {
-            this.speedValue.textContent = noteSpeed.toFixed(1);
+            this.speedValue.textContent = `${noteSpeed.toFixed(1)}x`;
         }
+        if (this.speedSlider) {
+            this.speedSlider.value = noteSpeed.toFixed(1);
+            this.speedSlider.setAttribute('aria-valuetext', `${noteSpeed.toFixed(1)}x`);
+        }
+    }
+
+    // ========== 打击音效音量 ==========
+    /** 设置打击音效音量（0-300%），只影响打击音，不动伴奏 */
+    setHitSoundVolume(percent) {
+        const num = Number(percent);
+        hitSoundVolume = Number.isFinite(num) ? Math.max(0, Math.min(300, Math.round(num))) : 100;
+        this.updateHitSoundDisplay();
+        this._syncSettingsToStore();
+    }
+
+    updateHitSoundDisplay() {
+        if (this.hitSoundValue) {
+            this.hitSoundValue.textContent = `${hitSoundVolume}%`;
+        }
+        if (this.hitSoundSlider) {
+            this.hitSoundSlider.value = hitSoundVolume;
+            this.hitSoundSlider.setAttribute('aria-valuetext', `${hitSoundVolume}%`);
+        }
+    }
+
+    /** 试听：按当前音量播一次 Perfect 打击音，0% 时给出明确提示 */
+    previewHitSound() {
+        audioEngine.unlock?.();
+        if (hitSoundVolume <= 0) {
+            this._notice('打击音效音量为 0%，调高后即可试听', 'warn', 2400);
+            return;
+        }
+        audioEngine.playHitSound('perfect');
     }
 
     // ========== 音频延迟校准 ==========
@@ -3731,17 +4042,17 @@ class UIManager {
             // 轨道匹配 + 未命中
             if (note.track !== track || note.hit) continue;
 
-            const timeDiff = Math.abs(currentTime - noteTime);
+            const offset = currentTime - noteTime;
+            const isPerfect = Math.abs(offset) <= perfectWindow;
+            const timingSide = gameState.recordHitTiming(offset, currentTime, isPerfect);
 
             // ===== Hold 长条头部 =====
             if (note.type === 'hold' && note.endTime) {
                 note.hit = true;
                 note.holdActive = true;
                 note.startTime = currentTime;   // 记录命中时刻，用于按住进度渐变
-                const isPerfect = timeDiff <= perfectWindow;
-                gameState.lastHitOffset = currentTime - noteTime;
-                gameState.lastHitAt = performance.now();
                 activeHolds[track] = note;
+                note._headTimingSide = timingSide;
                 // 存储头部判定结果，用于后续提前松开时修正计数
                 note._headWasPerfect = isPerfect;
 
@@ -3767,9 +4078,6 @@ class UIManager {
 
             // ===== Tap 音符 =====
             note.hit = true;
-            const isPerfect = timeDiff <= perfectWindow;
-            gameState.lastHitOffset = currentTime - noteTime;
-            gameState.lastHitAt = performance.now();
 
             if (isPerfect) {
                 gameState.perfect++;
@@ -4039,7 +4347,7 @@ class UIManager {
                         <span class="record-judges" aria-hidden="true" style="--p:${total ? p / total : 0};--g:${total ? g / total : 0};--m:${total ? m / total : 0}">
                             <span></span><span></span><span></span>
                         </span>
-                        <span class="record-counts">P ${p} · G ${g} · M ${m}</span>
+                        <span class="record-counts">P ${p} · G ${g} · M ${m}${this._timingTicketCounts(r)}</span>
                     </span>
                 </button>`;
         }).join('');
@@ -4050,6 +4358,14 @@ class UIManager {
                 this._showRecordDetail(r.songName, r.id);
             });
         });
+    }
+
+    /** 记录小票上的早/晚摘要；旧记录未记录时保持空白，不伪造 0。 */
+    _timingTicketCounts(record) {
+        const e = this._timingCount(record.early);
+        const l = this._timingCount(record.late);
+        if (e === null || l === null) return '';
+        return ` · <i class="tc-early">E ${e}</i> · <i class="tc-late">L ${l}</i>`;
     }
 
     /** 显示记录详情（含折线图） */
@@ -4100,7 +4416,10 @@ class UIManager {
                 </div>
                 <div class="stat-mini">
                     <span class="stat-mini-label">SPEED</span>
-                    <span class="stat-mini-value">${record.speed.toFixed(1)}x</span>
+                    <span class="stat-mini-value">${(Number(record.speed) || 16).toFixed(1)}x</span>
+                </div>
+                <div class="timing-split is-detail" role="group" aria-label="Early and late hit counts">
+                    ${this._timingSplitHtml(record.early, record.late)}
                 </div>
             `;
         }
@@ -4108,175 +4427,19 @@ class UIManager {
         // 存储当前查看的记录信息
         this._detailSongName = songName;
         this._detailRecordId = recordId;
-        // 同时存下 history 引用，便于在布局完成后绘制图表
-        this._pendingChartHistory = (record.performanceHistory && record.performanceHistory.length > 0)
+        // 同时存下 history 引用，便于在布局完成后绘制图表 / resize 重绘
+        this._detailHistory = (record.performanceHistory && record.performanceHistory.length > 0)
             ? record.performanceHistory : null;
+        this._pendingChartHistory = this._detailHistory;
 
         // 关键：先让详情面板可见，浏览器完成布局后再绘制折线图
         this.lbDetail.style.display = 'flex';
 
         // 延迟一帧等待布局计算完成，确保 canvas 父容器有正确的尺寸
         requestAnimationFrame(() => {
-            if (this._pendingChartHistory) {
-                this._drawDetailChart(this._pendingChartHistory);
-            } else if (this.lbChartCanvas) {
-                const parent = this.lbChartCanvas.parentElement;
-                const w = parent ? parent.clientWidth : 300;
-                const h = parent ? parent.clientHeight : 140;
-                this.lbChartCanvas.width = w;
-                this.lbChartCanvas.height = h;
-                const ctx = this.lbChartCanvas.getContext('2d');
-                ctx.clearRect(0, 0, w, h);
-                ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.font = '12px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText('No performance data', w / 2, h / 2);
-            }
+            renderer?.drawPerformanceChart(this.lbChartCanvas, this._pendingChartHistory || []);
             this._pendingChartHistory = null;
         });
-    }
-
-    /** 绘制详情折线图（对齐 renderer.drawLineChart 的实现） */
-    _drawDetailChart(history) {
-        if (!this.lbChartCanvas) return;
-
-        const canvas = this.lbChartCanvas;
-        const parent = canvas.parentElement;
-        if (!parent) return;
-
-        // 使用 clientWidth/clientHeight 获取 CSS 布局尺寸（与 renderer 版本一致）
-        const w = parent.clientWidth;
-        const h = parent.clientHeight;
-        if (w <= 0 || h <= 0) return;
-
-        canvas.width = w;
-        canvas.height = h;
-
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, w, h);
-
-        if (!history || history.length === 0) return;
-
-        const leftMargin = 40, topMargin = 18, bottomMargin = 22, rightMargin = 14;
-        const chartW = w - leftMargin - rightMargin;
-        const chartH = h - topMargin - bottomMargin;
-
-        if (chartW <= 0 || chartH <= 0) return;
-
-        // 背景
-        ctx.fillStyle = 'rgba(255,255,255,0.02)';
-        ctx.fillRect(0, 0, w, h);
-
-        // ---- 动态 Y 轴范围 ----
-        let minAcc = 100, maxAcc = 0;
-        for (let i = 0; i < history.length; i++) {
-            const acc = history[i].totalAcc;
-            if (acc < minAcc) minAcc = acc;
-            if (acc > maxAcc) maxAcc = acc;
-        }
-
-        // 如果所有值相同，给它一点呼吸空间
-        if (minAcc === maxAcc) {
-            minAcc = Math.max(0, minAcc - 10);
-            maxAcc = Math.min(100, maxAcc + 10);
-        }
-
-        const range = maxAcc - minAcc;
-        const padding = range * 0.1;
-        const yMin = Math.max(0, minAcc - padding);
-        const yMax = Math.min(100, maxAcc + padding);
-        const yRange = yMax - yMin;
-
-        // ---- Y 轴刻度和网格 ----
-        const yTicks = this._generateYTicks(yMin, yMax);
-
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-
-        for (let i = 0; i < yTicks.length; i++) {
-            const yPos = topMargin + chartH - (chartH * (yTicks[i] - yMin) / yRange);
-            ctx.fillText(yTicks[i].toFixed(0) + '%', leftMargin - 5, yPos);
-        }
-
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        ctx.lineWidth = 1;
-        for (let i = 0; i < yTicks.length; i++) {
-            const yPos = topMargin + chartH - (chartH * (yTicks[i] - yMin) / yRange);
-            ctx.beginPath();
-            ctx.moveTo(leftMargin, yPos);
-            ctx.lineTo(leftMargin + chartW, yPos);
-            ctx.stroke();
-        }
-
-        // ---- X 轴标签 ----
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.font = '8px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-
-        const totalDuration = history[history.length - 1].time;
-        const xSteps = Math.min(5, history.length);
-        for (let i = 0; i <= xSteps; i++) {
-            const fraction = xSteps > 0 ? i / xSteps : 0;
-            const x = leftMargin + chartW * fraction;
-            const sec = Math.round((totalDuration / 1000) * fraction);
-            ctx.fillText(sec + 's', x, topMargin + chartH + 6);
-        }
-
-        // ---- 折线 ----
-        const pointSpacing = history.length > 1 ? chartW / (history.length - 1) : 0;
-
-        ctx.strokeStyle = '#4dabf7';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        for (let i = 0; i < history.length; i++) {
-            const x = leftMargin + i * pointSpacing;
-            const normAcc = (history[i].totalAcc - yMin) / yRange;
-            const y = topMargin + chartH - (chartH * normAcc);
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-        }
-        ctx.stroke();
-
-        // ---- 数据点 ----
-        ctx.fillStyle = '#4dabf7';
-        for (let i = 0; i < history.length; i++) {
-            const x = leftMargin + i * pointSpacing;
-            const normAcc = (history[i].totalAcc - yMin) / yRange;
-            const y = topMargin + chartH - (chartH * normAcc);
-            ctx.beginPath();
-            ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-            ctx.fill();
-        }
-    }
-
-    /** 生成 Y 轴刻度（与 renderer._generateYTicks 一致） */
-    _generateYTicks(min, max) {
-        const range = max - min;
-        let interval = 10;
-        if (range <= 10) interval = 2;
-        else if (range <= 20) interval = 5;
-        else if (range <= 50) interval = 10;
-        else if (range <= 100) interval = 20;
-
-        const ticks = [];
-        const start = Math.ceil(min / interval) * interval;
-        const end = Math.floor(max / interval) * interval;
-        for (let i = start; i <= end; i += interval) {
-            if (i >= min && i <= max) ticks.push(i);
-        }
-        if (ticks.length < 3) {
-            ticks.push(Math.round(min));
-            ticks.push(Math.round(max));
-            ticks.sort((a, b) => a - b);
-        }
-        return [...new Set(ticks)];
     }
 
     /** 删除当前查看的记录（多重防护） */
@@ -4468,6 +4631,7 @@ class UIManager {
                         gameState.intervalStats.perfect = Math.max(0, gameState.intervalStats.perfect - 1);
                     } else if (holdNote._headWasPerfect === false) {
                         gameState.great--;
+                        if (holdNote._headTimingSide) gameState[holdNote._headTimingSide]--;
                         gameState.intervalStats.great = Math.max(0, gameState.intervalStats.great - 1);
                     }
                     gameState.miss++;
